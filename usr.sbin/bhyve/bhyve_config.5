@@ -1,6 +1,7 @@
 .\" SPDX-License-Identifier: BSD-2-Clause
 .\"
 .\" Copyright (c) 2021 John H. Baldwin <jhb@FreeBSD.org>
+.\" Copyright (c) 2026 Hans Rosenfeld
 .\"
 .\" Redistribution and use in source and binary forms, with or without
 .\" modification, are permitted provided that the following conditions
@@ -761,13 +762,61 @@ If specified, it must be a unicast MAC address.
 The largest supported MTU advertised to the guest.
 .El
 .Ss VirtIO SCSI Settings
-.Bl -column "Name" "integer" "Default"
+.Bl -column "num_queues" "Format" "Default"
 .It Sy Name Ta Sy Format Ta Sy Default Ta Sy Description
-.It Va dev Ta path Ta Ta
-The path of a CAM target layer (CTL) device to export:
-.Pa /dev/cam/ctl Ns Oo Ar pp . Ns Ar vp Oc .
-.It Va iid Ta integer Ta 0 Ta
-Initiator ID to use when sending requests to the CTL port.
+.It Va backend Ta string Ta ctl Ta
+The virtio-scsi backend to use (case-insensitive).
+.It Va ctl_ringsz Ta integer Ta 64 Ta
+The ring size of the control queue.
+.It Va evt_ringsz Ta integer Ta 64 Ta
+The ring size of the event queue.
+.It Va req_ringsz Ta integer Ta 64 Ta
+The ring size of each I/O request queue.
+.It Va num_queues Ta integer Ta 1 Ta
+The number of I/O request queues.
+.It Va seg_max Ta integer Ta 64 Ta
+The maximum number of segments allowed in a single command.
+.It Va thr_per_q Ta integer Ta 16 Ta
+The number of parallel request processing threads per I/O request queue.
+.It Va target Ta Oo Va ID : Oc Ns path Ta /dev/cam/ctl Ta
+The backend
+.Ar path
+of a target to configure.
+Optionally, a numeric target
+.Ar ID
+in the range from 0 to 255 may be specified before the
+.Ar path ,
+separated by a colon.
+.El
+.Pp
+The
+.Va target
+variable may be specified multiple times with different
+.Ar path
+arguments to configure multiple distinct SCSI targets.
+If not explicitly configured, the target
+.Ar ID Ns s
+will be assigned sequentially beginning with the highest target
+.Ar ID
+configured so far, or 0 for the first target configured.
+The target
+.Ar ID Ns s
+must be unique within each virtio-scsi instance.
+.Pp
+The meaning of the
+.Ar path
+argument is specific to each backend:
+.Bl -column "Backend" "/dev/cam/ctl[pp.vp]"
+.It Sy Backend Ta Sy Path Ta Sy Description
+.It ctl Ta Pa /dev/cam/ctl Ns Oo Ar pp . Ns Ar vp Oc Ta
+The path of a CAM target layer (CTL) device to configure as a target.
+.El
+.Pp
+The following backend-specific variables are supported for VirtIO SCSI:
+.Bl -column "Backend" "Name" "integer" "Default"
+.It Sy Backend Ta Sy Name Ta Sy Format Ta Sy Default Ta Sy Description
+.It ctl Ta Va iid Ta integer Ta 0 Ta
+Initiator ID to use when sending requests to CTL.
 .El
 .Sh SEE ALSO
 .Xr expand_number 3 ,

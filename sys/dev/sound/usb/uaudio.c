@@ -356,7 +356,7 @@ struct uaudio_hid {
 
 struct uaudio_softc_child {
 	device_t pcm_device;
-	struct mtx *mixer_lock;
+	struct mtx mixer_lock;
 	struct snd_mixer *mixer_dev;
 
 	uint32_t mix_info;
@@ -713,6 +713,10 @@ static driver_t uaudio_driver = {
 	.size = sizeof(struct uaudio_softc),
 };
 
+static const STRUCT_USB_HOST_ID uaudio_vendor_audio[] = {
+	{ USB_VPI(USB_VENDOR_ROLAND, 0x0132, 0) }, /* UA-33 */
+};
+
 /* The following table is derived from Linux's quirks-table.h */ 
 static const STRUCT_USB_HOST_ID uaudio_vendor_midi[] = {
 	{ USB_VPI(USB_VENDOR_YAMAHA, 0x1000, 0) }, /* UX256 */
@@ -867,6 +871,11 @@ uaudio_probe(device_t dev)
 		return (ENXIO);
 
 	/* lookup non-standard device(s) */
+
+	if (usbd_lookup_id_by_uaa(uaudio_vendor_audio,
+	    sizeof(uaudio_vendor_audio), uaa) == 0) {
+		return (BUS_PROBE_SPECIFIC);
+	}
 
 	if (usbd_lookup_id_by_uaa(uaudio_vendor_midi,
 	    sizeof(uaudio_vendor_midi), uaa) == 0) {
@@ -2946,12 +2955,9 @@ uaudio_mixer_sysctl_handler(SYSCTL_HANDLER_ARGS)
 	sc = (struct uaudio_softc *)oidp->oid_arg1;
 	hint = oidp->oid_arg2;
 
-	if (sc->sc_child[0].mixer_lock == NULL)
-		return (ENXIO);
-
 	/* lookup mixer node */
 
-	mtx_lock(sc->sc_child[0].mixer_lock);
+	mtx_lock(&sc->sc_child[0].mixer_lock);
 	for (pmc = sc->sc_mixer_root; pmc != NULL; pmc = pmc->next) {
 		for (chan = 0; chan != (int)pmc->nchan; chan++) {
 			if (pmc->wValue[chan] != -1 &&
@@ -2962,7 +2968,7 @@ uaudio_mixer_sysctl_handler(SYSCTL_HANDLER_ARGS)
 		}
 	}
 found:
-	mtx_unlock(sc->sc_child[0].mixer_lock);
+	mtx_unlock(&sc->sc_child[0].mixer_lock);
 
 	error = sysctl_handle_int(oidp, &temp, 0, req);
 	if (error != 0 || req->newptr == NULL)
@@ -2970,7 +2976,7 @@ found:
 
 	/* update mixer value */
 
-	mtx_lock(sc->sc_child[0].mixer_lock);
+	mtx_lock(&sc->sc_child[0].mixer_lock);
 	if (pmc != NULL &&
 	    temp >= pmc->minval &&
 	    temp <= pmc->maxval) {
@@ -2980,7 +2986,7 @@ found:
 		/* start the transfer, if not already started */
 		usbd_transfer_start(sc->sc_mixer_xfer[0]);
 	}
-	mtx_unlock(sc->sc_child[0].mixer_lock);
+	mtx_unlock(&sc->sc_child[0].mixer_lock);
 
 	return (0);
 }
@@ -3211,10 +3217,7 @@ uaudio_mixer_reload_all(struct uaudio_softc *sc)
 	struct uaudio_mixer_node *pmc;
 	int chan;
 
-	if (sc->sc_child[0].mixer_lock == NULL)
-		return;
-
-	mtx_lock(sc->sc_child[0].mixer_lock);
+	mtx_lock(&sc->sc_child[0].mixer_lock);
 	for (pmc = sc->sc_mixer_root; pmc != NULL; pmc = pmc->next) {
 		/* use reset defaults for non-oss controlled settings */
 		if (pmc->ctl == SOUND_MIXER_NRDEVICES)
@@ -3226,7 +3229,7 @@ uaudio_mixer_reload_all(struct uaudio_softc *sc)
 
 	/* start HID volume keys, if any */
 	usbd_transfer_start(sc->sc_hid.xfer[0]);
-	mtx_unlock(sc->sc_child[0].mixer_lock);
+	mtx_unlock(&sc->sc_child[0].mixer_lock);
 }
 
 static void
@@ -5383,8 +5386,8 @@ uaudio_mixer_bsd2value(struct uaudio_mixer_node *mc, int val)
 }
 
 static void
-uaudio_mixer_ctl_set(struct uaudio_softc *sc, struct uaudio_mixer_node *mc,
-    uint8_t chan, int val)
+uaudio_mixer_ctl_set(struct uaudio_softc *sc, unsigned index,
+    struct uaudio_mixer_node *mc, uint8_t chan, int val)
 {
 	val = uaudio_mixer_bsd2value(mc, val);
 
@@ -5393,7 +5396,9 @@ uaudio_mixer_ctl_set(struct uaudio_softc *sc, struct uaudio_mixer_node *mc,
 
 	/* start the transfer, if not already started */
 
+	mtx_lock(&sc->sc_child[index].mixer_lock);
 	usbd_transfer_start(sc->sc_mixer_xfer[0]);
+	mtx_unlock(&sc->sc_child[index].mixer_lock);
 }
 
 static void
@@ -5430,13 +5435,13 @@ uaudio_mixer_init_sub(struct uaudio_softc *sc, struct snd_mixer *m)
 
 	DPRINTF("child=%u\n", i);
 
-	sc->sc_child[i].mixer_lock = mixer_get_lock(m);
+	mtx_init(&sc->sc_child[i].mixer_lock, "uaudio mixer lock", NULL, MTX_DEF);
 	sc->sc_child[i].mixer_dev = m;
 
 	if (i == 0 &&
 	    usbd_transfer_setup(sc->sc_udev, &sc->sc_mixer_iface_index,
 	    sc->sc_mixer_xfer, uaudio_mixer_config, 1, sc,
-	    sc->sc_child[i].mixer_lock)) {
+	    &sc->sc_child[i].mixer_lock)) {
 		DPRINTFN(0, "could not allocate USB transfer for mixer!\n");
 		return (ENOMEM);
 	}
@@ -5461,7 +5466,7 @@ uaudio_mixer_uninit_sub(struct uaudio_softc *sc, struct snd_mixer *m)
 	if (index == 0)
 		usbd_transfer_unsetup(sc->sc_mixer_xfer, 1);
 
-	sc->sc_child[index].mixer_lock = NULL;
+	mtx_destroy(&sc->sc_child[index].mixer_lock);
 
 	return (0);
 }
@@ -5479,7 +5484,7 @@ uaudio_mixer_set(struct uaudio_softc *sc, struct snd_mixer *m,
 	for (mc = sc->sc_mixer_root; mc != NULL; mc = mc->next) {
 		if (mc->ctl == type) {
 			for (chan = 0; chan < mc->nchan; chan++) {
-				uaudio_mixer_ctl_set(sc, mc, chan,
+				uaudio_mixer_ctl_set(sc, index, mc, chan,
 				    chan == 0 ? left : right);
 			}
 		}
@@ -5520,7 +5525,7 @@ uaudio_mixer_setrecsrc(struct uaudio_softc *sc, struct snd_mixer *m, uint32_t sr
 			for (i = mc->minval; (i > 0) && (i <= mc->maxval); i++) {
 				if (temp != (1U << mc->slctrtype[i - 1]))
 					continue;
-				uaudio_mixer_ctl_set(sc, mc, 0, i);
+				uaudio_mixer_ctl_set(sc, index, mc, 0, i);
 				break;
 			}
 		}
@@ -6044,7 +6049,7 @@ umidi_attach(device_t dev)
 		error = usb_fifo_attach(sc->sc_udev, chan, &chan->mtx,
 		    &umidi_fifo_methods, &sub->fifo, unit, n,
 		    chan->iface_index,
-		    UID_ROOT, GID_OPERATOR, 0666);
+		    UID_ROOT, GID_AUDIO, 0660);
 		if (error) {
 			goto detach;
 		}
@@ -6177,9 +6182,6 @@ uaudio_hid_attach(struct uaudio_softc *sc,
 	if (!(sc->sc_hid.flags & UAUDIO_HID_VALID))
 		return (-1);
 
-	if (sc->sc_child[0].mixer_lock == NULL)
-		return (-1);
-
 	/* Get HID descriptor */
 	error = usbd_req_get_hid_desc(uaa->device, NULL, &d_ptr,
 	    &d_len, M_TEMP, sc->sc_hid.iface_index);
@@ -6238,7 +6240,7 @@ uaudio_hid_attach(struct uaudio_softc *sc,
 	/* allocate USB transfers */
 	error = usbd_transfer_setup(uaa->device, &sc->sc_hid.iface_index,
 	    sc->sc_hid.xfer, uaudio_hid_config, UAUDIO_HID_N_TRANSFER,
-	    sc, sc->sc_child[0].mixer_lock);
+	    sc, &sc->sc_child[0].mixer_lock);
 	if (error) {
 		DPRINTF("error=%s\n", usbd_errstr(error));
 		return (-1);
@@ -6258,4 +6260,5 @@ MODULE_DEPEND(snd_uaudio, sound, SOUND_MINVER, SOUND_PREFVER, SOUND_MAXVER);
 MODULE_DEPEND(snd_uaudio, hid, 1, 1, 1);
 MODULE_VERSION(snd_uaudio, 1);
 USB_PNP_HOST_INFO(uaudio_devs);
+USB_PNP_HOST_INFO(uaudio_vendor_audio);
 USB_PNP_HOST_INFO(uaudio_vendor_midi);

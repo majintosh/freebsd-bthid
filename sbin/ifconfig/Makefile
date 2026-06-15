@@ -66,6 +66,7 @@ LIBADD+=	nv
 
 .if ${MK_NETLINK_SUPPORT} != "no"
 SRCS+=	ifconfig_netlink.c
+SRCS+=	ifgeneve.c		# GENEVE support
 .else
 CFLAGS+=-DWITHOUT_NETLINK
 .endif

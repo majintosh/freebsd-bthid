@@ -175,18 +175,37 @@ dump_rc_nhop_mtu(struct nl_writer *nw, const struct nhop_object *nh)
 }
 
 static void
-dump_rc_nhg(struct nl_writer *nw, const struct nhgrp_object *nhg, struct rtmsg *rtm)
+dump_rc_nhg(struct nl_writer *nw, const struct route_nhop_data *rnd, struct rtmsg *rtm)
 {
-	uint32_t uidx = nhgrp_get_uidx(nhg);
-	uint32_t num_nhops, nh_expire;
-	const struct weightened_nhop *wn = nhgrp_get_nhops(nhg, &num_nhops);
-	uint32_t base_rtflags = nhop_get_rtflags(wn[0].nh);
+	const struct nhgrp_object *nhg = rnd->rnd_nhgrp;
+	const struct weightened_nhop *wn;
+	struct nhop_object *nh;
+	uint32_t uidx, num_nhops, nh_expire;
+	uint32_t base_rtflags, rtflags, nhop_weight, nhop_metric;
 
+	MPASS((NH_IS_NHGRP(rnd->rnd_nhop)));
+
+	/* select a nhop from nhgrp to not confuse non-mpath consumers */
+	nhop_weight = RT_DEFAULT_WEIGHT;
+	nhop_metric = RT_DEFAULT_METRIC;
+	nh = nhop_select_func(rnd->rnd_nhop, 0);
+	rtflags = nhop_get_rtflags(nh);
+	if (nh->nh_flags & NHF_GATEWAY)
+		dump_rc_nhop_gw(nw, nh);
+
+	wn = nhgrp_get_nhops(nhg, &num_nhops);
+	base_rtflags = nhop_get_rtflags(wn[0].nh);
+	uidx = nhgrp_get_uidx(nhg);
 	if (uidx != 0)
 		nlattr_add_u32(nw, NL_RTA_NH_ID, uidx);
 	nlattr_add_u32(nw, NL_RTA_KNH_ID, nhgrp_get_idx(nhg));
-
 	nlattr_add_u32(nw, NL_RTA_RTFLAGS, base_rtflags);
+
+	if (rtflags & RTF_FIXEDMTU)
+		dump_rc_nhop_mtu(nw, nh);
+	/* In any case, fill outgoing interface */
+	nlattr_add_u32(nw, NL_RTA_OIF, if_getindex(nh->nh_ifp));
+
 	int off = nlattr_add_nested(nw, NL_RTA_MULTIPATH);
 	if (off == 0)
 		return;
@@ -198,17 +217,23 @@ dump_rc_nhg(struct nl_writer *nw, const struct nhgrp_object *nhg, struct rtmsg *
 			return;
 		rtnh->rtnh_flags = 0;
 		rtnh->rtnh_ifindex = if_getindex(wn[i].nh->nh_ifp);
-		rtnh->rtnh_hops = wn[i].weight;
+		rtnh->rtnh_hops = MIN(wn[i].weight, UINT8_MAX);
 		dump_rc_nhop_gw(nw, wn[i].nh);
 		uint32_t rtflags = nhop_get_rtflags(wn[i].nh);
 		if (rtflags != base_rtflags)
 			nlattr_add_u32(nw, NL_RTA_RTFLAGS, rtflags);
 		if (rtflags & RTF_FIXEDMTU)
 			dump_rc_nhop_mtu(nw, wn[i].nh);
+		nlattr_add_u32(nw, NL_RTA_PRIORITY, nhop_get_metric(wn[i].nh));
 		nh_expire = nhop_get_expire(wn[i].nh);
 		if (nh_expire > 0)
 			nlattr_add_u32(nw, NL_RTA_EXPIRES, nh_expire - time_uptime);
 		rtnh = nlattr_restore_offset(nw, nh_off, struct rtnexthop);
+
+		if (nh == wn[i].nh) {
+			nhop_weight = wn[i].weight;
+			nhop_metric = nhop_get_metric(wn[i].nh);
+		}
 		/*
 		 * nlattr_add() allocates 4-byte aligned storage, no need to aligh
 		 * length here
@@ -216,6 +241,9 @@ dump_rc_nhg(struct nl_writer *nw, const struct nhgrp_object *nhg, struct rtmsg *
 		rtnh->rtnh_len = nlattr_save_offset(nw) - nh_off;
 	}
 	nlattr_set_len(nw, off);
+	nlattr_add_u32(nw, NL_RTA_PRIORITY, nhop_metric);
+	if (nhop_weight != RT_DEFAULT_WEIGHT)
+		nlattr_add_u32(nw, NL_RTA_WEIGHT, nhop_weight);
 }
 
 static void
@@ -225,7 +253,7 @@ dump_rc_nhop(struct nl_writer *nw, const struct route_nhop_data *rnd, struct rtm
 	uint32_t rtflags, uidx, nh_expire;
 
 	if (NH_IS_NHGRP(rnd->rnd_nhop)) {
-		dump_rc_nhg(nw, rnd->rnd_nhgrp, rtm);
+		dump_rc_nhg(nw, rnd, rtm);
 		return;
 	}
 
@@ -256,6 +284,7 @@ dump_rc_nhop(struct nl_writer *nw, const struct route_nhop_data *rnd, struct rtm
 	/* In any case, fill outgoing interface */
 	nlattr_add_u32(nw, NL_RTA_OIF, if_getindex(nh->nh_ifp));
 
+	nlattr_add_u32(nw, NL_RTA_PRIORITY, nhop_get_metric(nh));
 	if (rnd->rnd_weight != RT_DEFAULT_WEIGHT)
 		nlattr_add_u32(nw, NL_RTA_WEIGHT, rnd->rnd_weight);
 }
@@ -324,7 +353,10 @@ dump_px(uint32_t fibnum, const struct nlmsghdr *hdr,
 	rtm = nlattr_restore_offset(nw, rtm_off, struct rtmsg);
 	if (plen > 0)
 		rtm->rtm_dst_len = plen;
-	dump_rc_nhop(nw, rnd, rtm);
+	if (NH_IS_NHGRP(rnd->rnd_nhop))
+		dump_rc_nhg(nw, rnd, rtm);
+	else
+		dump_rc_nhop(nw, rnd, rtm);
 
 	if (nlmsg_end(nw))
 		return (0);
@@ -445,13 +477,18 @@ nlattr_get_multipath(struct nlattr *nla, struct nl_pstate *npt,
 	max_nhops = data_len / sizeof(struct rtnexthop);
 
 	mp = npt_alloc(npt, (max_nhops + 2) * sizeof(struct rta_mpath_nh));
+	if (mp == NULL) {
+		NLMSG_REPORT_ERR_MSG(npt, "%s: too many RTA_MULTIPATH", __func__);
+		return (ENOMEM);
+	}
 	mp->num_nhops = 0;
 
 	for (rtnh = (struct rtnexthop *)(nla + 1); data_len > 0; ) {
 		struct rta_mpath_nh *mpnh;
 
+		len = NL_ITEM_ALIGN(rtnh->rtnh_len);
 		if (__predict_false(rtnh->rtnh_len <= sizeof(*rtnh) ||
-		    rtnh->rtnh_len > data_len)) {
+		    len < rtnh->rtnh_len || len > data_len)) {
 			NLMSG_REPORT_ERR_MSG(npt, "%s: bad length %u",
 			    __func__, rtnh->rtnh_len);
 			return (EINVAL);
@@ -465,7 +502,6 @@ nlattr_get_multipath(struct nlattr *nla, struct nl_pstate *npt,
 			    mp->num_nhops - 1);
 			return (error);
 		}
-		len = NL_ITEM_ALIGN(rtnh->rtnh_len);
 		data_len -= len;
 		rtnh = (struct rtnexthop *)((char *)rtnh + len);
 	}
@@ -487,6 +523,7 @@ struct nl_parsed_route {
 	uint32_t		rta_table;
 	uint32_t		rta_rtflags;
 	uint32_t		rta_nh_id;
+	uint32_t		rta_metric;
 	uint32_t		rta_weight;
 	uint32_t		rta_expire;
 	uint32_t		rtax_mtu;
@@ -509,6 +546,7 @@ static const struct nlattr_parser nla_p_rtmsg[] = {
 	{ .type = NL_RTA_DST, .off = _OUT(rta_dst), .cb = nlattr_get_ip },
 	{ .type = NL_RTA_OIF, .off = _OUT(rta_oif), .cb = nlattr_get_ifp },
 	{ .type = NL_RTA_GATEWAY, .off = _OUT(rta_gw), .cb = nlattr_get_ip },
+	{ .type = NL_RTA_PRIORITY, .off = _OUT(rta_metric), .cb = nlattr_get_uint32 },
 	{ .type = NL_RTA_METRICS, .arg = &metrics_parser, .cb = nlattr_get_nested },
 	{ .type = NL_RTA_MULTIPATH, .off = _OUT(rta_multipath), .cb = nlattr_get_multipath },
 	{ .type = NL_RTA_WEIGHT, .off = _OUT(rta_weight), .cb = nlattr_get_uint32 },
@@ -655,7 +693,6 @@ handle_rtm_getroute(struct nlpcb *nlp, struct nl_parsed_route *attrs,
 	}
 
 	rt_get_rnd(rt, &rnd);
-	rnd.rnd_nhop = nhop_select_func(rnd.rnd_nhop, 0);
 
 	RIB_RUNLOCK(rnh);
 
@@ -690,7 +727,7 @@ handle_rtm_dump(struct nlpcb *nlp, uint32_t fibnum, int family,
 
 	if (fibnum == RT_TABLE_UNSPEC) {
 		for (int i = 0; i < V_rt_numfibs; i++) {
-			dump_rtable_fib(&wa, fibnum, family);
+			dump_rtable_fib(&wa, i, family);
 			if (wa.error != 0)
 				break;
 		}
@@ -838,6 +875,7 @@ create_nexthop_one(struct nl_parsed_route *attrs, struct rta_mpath_nh *mpnh,
 		nhop_set_transmit_ifp(nh, mpnh->ifp);
 	nhop_set_pxtype_flag(nh, get_pxflag(attrs));
 	nhop_set_rtflags(nh, attrs->rta_rtflags);
+	nhop_set_metric(nh, attrs->rta_metric);
 	if (attrs->rtm_protocol > RTPROT_STATIC)
 		nhop_set_origin(nh, attrs->rtm_protocol);
 
@@ -859,6 +897,10 @@ create_nexthop_from_attrs(struct nl_parsed_route *attrs,
 		int num_nhops = attrs->rta_multipath->num_nhops;
 		struct weightened_nhop *wn = npt_alloc(npt, sizeof(*wn) * num_nhops);
 
+		if (wn == NULL) {
+			*perror = ENOMEM;
+			return (NULL);
+		}
 		for (int i = 0; i < num_nhops; i++) {
 			struct rta_mpath_nh *mpnh = &attrs->rta_multipath->nhops[i];
 
@@ -913,6 +955,7 @@ create_nexthop_from_attrs(struct nl_parsed_route *attrs,
 			nhop_set_broadcast(nh, true);
 		if (attrs->rtm_protocol > RTPROT_STATIC)
 			nhop_set_origin(nh, attrs->rtm_protocol);
+		nhop_set_metric(nh, attrs->rta_metric);
 		nhop_set_pxtype_flag(nh, get_pxflag(attrs));
 		nhop_set_rtflags(nh, attrs->rta_rtflags);
 
@@ -935,6 +978,14 @@ create_nexthop_from_attrs(struct nl_parsed_route *attrs,
 	return (nh);
 }
 
+/* pre-2.6.19 Linux API compatibility: prefer RTA_TABLE, fall back to rtm_table */
+static inline void
+old_linux_compat(struct nl_parsed_route *attrs)
+{
+	if (attrs->rtm_table > 0 && attrs->rta_table == 0)
+		attrs->rta_table = attrs->rtm_table;
+}
+
 static int
 rtnl_handle_newroute(struct nlmsghdr *hdr, struct nlpcb *nlp,
     struct nl_pstate *npt)
@@ -954,9 +1005,7 @@ rtnl_handle_newroute(struct nlmsghdr *hdr, struct nlpcb *nlp,
 		return (EINVAL);
 	}
 
-	/* pre-2.6.19 Linux API compatibility */
-	if (attrs.rtm_table > 0 && attrs.rta_table == 0)
-		attrs.rta_table = attrs.rtm_table;
+	old_linux_compat(&attrs);
 	if (attrs.rta_table >= V_rt_numfibs || attrs.rtm_family > AF_MAX) {
 		NLMSG_REPORT_ERR_MSG(npt, "invalid fib");
 		return (EINVAL);
@@ -994,6 +1043,9 @@ path_match_func(const struct rtentry *rt, const struct nhop_object *nh, void *_d
 {
 	struct nl_parsed_route *attrs = (struct nl_parsed_route *)_data;
 
+	if (attrs->rta_metric != 0 && attrs->rta_metric != nhop_get_metric(nh))
+		return (0);
+
 	if ((attrs->rta_gw != NULL) && !rib_match_gw(rt, nh, attrs->rta_gw))
 		return (0);
 
@@ -1020,6 +1072,7 @@ rtnl_handle_delroute(struct nlmsghdr *hdr, struct nlpcb *nlp,
 		return (ESRCH);
 	}
 
+	old_linux_compat(&attrs);
 	if (attrs.rta_table >= V_rt_numfibs || attrs.rtm_family > AF_MAX) {
 		NLMSG_REPORT_ERR_MSG(npt, "invalid fib");
 		return (EINVAL);
@@ -1043,6 +1096,7 @@ rtnl_handle_getroute(struct nlmsghdr *hdr, struct nlpcb *nlp, struct nl_pstate *
 	if (error != 0)
 		return (error);
 
+	old_linux_compat(&attrs);
 	if (attrs.rta_table >= V_rt_numfibs || attrs.rtm_family > AF_MAX) {
 		NLMSG_REPORT_ERR_MSG(npt, "invalid fib");
 		return (EINVAL);

@@ -219,7 +219,9 @@ looutput(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst,
 	if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
 	if_inc_counter(ifp, IFCOUNTER_OBYTES, m->m_pkthdr.len);
 
+#ifdef RSS
 	M_HASHTYPE_CLEAR(m);
+#endif
 
 	/* BPF writes need to be handled specially. */
 	if (dst->sa_family == AF_UNSPEC || dst->sa_family == pseudo_AF_HDRCMPLT)
@@ -276,6 +278,7 @@ int
 if_simloop(struct ifnet *ifp, struct mbuf *m, int af, int hlen)
 {
 	int isr;
+	int32_t len;
 
 	M_ASSERTPKTHDR(m);
 	m_tag_delete_nonpersistent(m);
@@ -350,9 +353,14 @@ if_simloop(struct ifnet *ifp, struct mbuf *m, int af, int hlen)
 		m_freem(m);
 		return (EAFNOSUPPORT);
 	}
-	if_inc_counter(ifp, IFCOUNTER_IPACKETS, 1);
-	if_inc_counter(ifp, IFCOUNTER_IBYTES, m->m_pkthdr.len);
-	netisr_queue(isr, m);	/* mbuf is free'd on failure. */
+	len = m->m_pkthdr.len;
+	if (netisr_queue(isr, m) == 0) {
+		if_inc_counter(ifp, IFCOUNTER_IPACKETS, 1);
+		if_inc_counter(ifp, IFCOUNTER_IBYTES, len);
+	} else {
+		/* mbuf is free'd on failure. */
+		if_inc_counter(ifp, IFCOUNTER_IQDROPS, 1);
+	}
 	return (0);
 }
 

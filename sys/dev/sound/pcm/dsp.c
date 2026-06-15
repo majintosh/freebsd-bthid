@@ -54,10 +54,10 @@ struct dsp_cdevpriv {
 	struct pcm_channel *wrch;
 };
 
-static int dsp_mmap_allow_prot_exec = 0;
+static int dsp_mmap_allow_prot_exec = -1;
 SYSCTL_INT(_hw_snd, OID_AUTO, compat_linux_mmap, CTLFLAG_RWTUN,
     &dsp_mmap_allow_prot_exec, 0,
-    "linux mmap compatibility (-1=force disable 0=auto 1=force enable)");
+    "linux mmap compatibility (-1=force-disable 0=auto)");
 
 static int dsp_basename_clone = 1;
 SYSCTL_INT(_hw_snd, OID_AUTO, basename_clone, CTLFLAG_RWTUN,
@@ -77,7 +77,6 @@ static d_read_t dsp_read;
 static d_write_t dsp_write;
 static d_ioctl_t dsp_ioctl;
 static d_poll_t dsp_poll;
-static d_mmap_t dsp_mmap;
 static d_mmap_single_t dsp_mmap_single;
 static d_kqfilter_t dsp_kqfilter;
 
@@ -89,7 +88,6 @@ struct cdevsw dsp_cdevsw = {
 	.d_ioctl	= dsp_ioctl,
 	.d_poll		= dsp_poll,
 	.d_kqfilter	= dsp_kqfilter,
-	.d_mmap		= dsp_mmap,
 	.d_mmap_single	= dsp_mmap_single,
 	.d_name		= "dsp",
 };
@@ -124,8 +122,8 @@ dsp_make_dev(device_t dev)
 	make_dev_args_init(&devargs);
 	devargs.mda_devsw = &dsp_cdevsw;
 	devargs.mda_uid = UID_ROOT;
-	devargs.mda_gid = GID_WHEEL;
-	devargs.mda_mode = 0666;
+	devargs.mda_gid = GID_AUDIO;
+	devargs.mda_mode = 0660;
 	devargs.mda_si_drv1 = sc;
 	err = make_dev_s(&devargs, &sc->dsp_dev, "dsp%d", unit);
 	if (err != 0) {
@@ -728,8 +726,7 @@ dsp_ioctl(struct cdev *i_dev, u_long cmd, caddr_t arg, int mode,
 
 		if (d->mixer_dev != NULL) {
 			PCM_ACQUIRE_QUICK(d);
-			ret = mixer_ioctl_cmd(d->mixer_dev, cmd, arg, -1, td,
-			    MIXER_CMD_DIRECT);
+			ret = mixer_ioctl_cmd(d->mixer_dev, cmd, arg, -1, td);
 			PCM_RELEASE_QUICK(d);
 		} else
 			ret = EBADF;
@@ -1526,8 +1523,7 @@ dsp_ioctl(struct cdev *i_dev, u_long cmd, caddr_t arg, int mode,
 
 		if (d->mixer_dev != NULL) {
 			PCM_ACQUIRE_QUICK(d);
-			ret = mixer_ioctl_cmd(d->mixer_dev, xcmd, arg, -1, td,
-			    MIXER_CMD_DIRECT);
+			ret = mixer_ioctl_cmd(d->mixer_dev, xcmd, arg, -1, td);
 			PCM_RELEASE_QUICK(d);
 		} else
 			ret = ENOTSUP;
@@ -1539,8 +1535,7 @@ dsp_ioctl(struct cdev *i_dev, u_long cmd, caddr_t arg, int mode,
 	case SNDCTL_DSP_SET_RECSRC:
 		if (d->mixer_dev != NULL) {
 			PCM_ACQUIRE_QUICK(d);
-			ret = mixer_ioctl_cmd(d->mixer_dev, cmd, arg, -1, td,
-			    MIXER_CMD_DIRECT);
+			ret = mixer_ioctl_cmd(d->mixer_dev, cmd, arg, -1, td);
 			PCM_RELEASE_QUICK(d);
 		} else
 			ret = ENOTSUP;
@@ -1877,66 +1872,119 @@ dsp_poll(struct cdev *i_dev, int events, struct thread *td)
 
 	ret = 0;
 
-	dsp_lock_chans(priv, FREAD | FWRITE);
 	wrch = priv->wrch;
 	rdch = priv->rdch;
 
 	if (wrch != NULL && !(wrch->flags & CHN_F_DEAD)) {
+		CHN_LOCK(wrch);
 		e = (events & (POLLOUT | POLLWRNORM));
 		if (e)
 			ret |= chn_poll(wrch, e, td);
+		CHN_UNLOCK(wrch);
 	}
 
 	if (rdch != NULL && !(rdch->flags & CHN_F_DEAD)) {
+		CHN_LOCK(rdch);
 		e = (events & (POLLIN | POLLRDNORM));
 		if (e)
 			ret |= chn_poll(rdch, e, td);
+		CHN_UNLOCK(rdch);
 	}
-
-	dsp_unlock_chans(priv, FREAD | FWRITE);
 
 	PCM_GIANT_LEAVE(d);
 
 	return (ret);
 }
 
-static int
-dsp_mmap(struct cdev *i_dev, vm_ooffset_t offset, vm_paddr_t *paddr,
-    int nprot, vm_memattr_t *memattr)
-{
+struct dsp_mmap_handle {
+	struct cdev *cdev;
+	struct snd_dbuf *buf;
+};
 
-	/*
-	 * offset is in range due to checks in dsp_mmap_single().
-	 * XXX memattr is not honored.
-	 */
-	*paddr = vtophys(offset);
+static int
+dsp_dev_pager_ctor(void *handle, vm_ooffset_t size, vm_prot_t prot,
+    vm_ooffset_t foff, struct ucred *cred, u_short *color)
+{
+	struct dsp_mmap_handle *h = handle;
+
+	dev_ref(h->cdev);
+	sndbuf_ref(h->buf);
 	return (0);
 }
 
+static void
+dsp_dev_pager_dtor(void *handle)
+{
+	struct dsp_mmap_handle *h = handle;
+
+	sndbuf_rele(h->buf);
+	dev_rel(h->cdev);
+	free(h, M_DEVBUF);
+}
+
 static int
-dsp_mmap_single(struct cdev *i_dev, vm_ooffset_t *offset,
+dsp_dev_pager_fault(vm_object_t object, vm_ooffset_t offset, int prot,
+    vm_page_t *mres)
+{
+	struct dsp_mmap_handle *h = object->handle;
+	vm_page_t m;
+	uintptr_t addr;
+	vm_paddr_t paddr;
+
+	addr = (uintptr_t)offset;
+	if (addr < (uintptr_t)h->buf->buf ||
+	    addr >= (uintptr_t)h->buf->buf + h->buf->allocsize)
+		return (VM_PAGER_ERROR);
+	paddr = vtophys((void *)addr);
+
+	if (((*mres)->flags & PG_FICTITIOUS) != 0) {
+		m = *mres;
+		vm_page_updatefake(m, paddr, object->memattr);
+	} else {
+		VM_OBJECT_WUNLOCK(object);
+		m = vm_page_getfake(paddr, object->memattr);
+		VM_OBJECT_WLOCK(object);
+		vm_page_replace(m, object, (*mres)->pindex, *mres);
+		*mres = m;
+	}
+	m->valid = VM_PAGE_BITS_ALL;
+	return (VM_PAGER_OK);
+}
+
+static void
+dsp_dev_pager_path(void *handle, char *path, size_t len)
+{
+	struct dsp_mmap_handle *h = handle;
+
+	dev_copyname(h->cdev, path, len);
+}
+
+static const struct cdev_pager_ops dsp_dev_pager_ops = {
+	.cdev_pg_ctor = dsp_dev_pager_ctor,
+	.cdev_pg_dtor = dsp_dev_pager_dtor,
+	.cdev_pg_fault = dsp_dev_pager_fault,
+	.cdev_pg_path = dsp_dev_pager_path,
+};
+
+static int
+dsp_mmap_single(struct cdev *cdev, vm_ooffset_t *offset,
     vm_size_t size, struct vm_object **object, int nprot)
 {
+	struct dsp_mmap_handle *handle;
 	struct dsp_cdevpriv *priv;
 	struct snddev_info *d;
 	struct pcm_channel *wrch, *rdch, *c;
 	int err;
 
+	if (*offset >= *offset + size)
+		return (EINVAL);
+
 	/*
-	 * Reject PROT_EXEC by default. It just doesn't makes sense.
-	 * Unfortunately, we have to give up this one due to linux_mmap
-	 * changes.
-	 *
 	 * https://lists.freebsd.org/pipermail/freebsd-emulation/2007-June/003698.html
-	 *
 	 */
-#ifdef SV_ABI_LINUX
 	if ((nprot & PROT_EXEC) && (dsp_mmap_allow_prot_exec < 0 ||
 	    (dsp_mmap_allow_prot_exec == 0 &&
 	    SV_CURPROC_ABI() != SV_ABI_LINUX)))
-#else
-	if ((nprot & PROT_EXEC) && dsp_mmap_allow_prot_exec < 1)
-#endif
 		return (EINVAL);
 
 	/*
@@ -1976,13 +2024,18 @@ dsp_mmap_single(struct cdev *i_dev, vm_ooffset_t *offset,
 
 	*offset = (uintptr_t)sndbuf_getbufofs(c->bufsoft, *offset);
 	dsp_unlock_chans(priv, FREAD | FWRITE);
-	*object = vm_pager_allocate(OBJT_DEVICE, i_dev,
+
+	handle = malloc(sizeof(*handle), M_DEVBUF, M_WAITOK);
+	handle->cdev = cdev;
+	handle->buf = c->bufsoft;
+	*object = cdev_pager_allocate(handle, OBJT_DEVICE, &dsp_dev_pager_ops,
 	    size, nprot, *offset, curthread->td_ucred);
-
 	PCM_GIANT_LEAVE(d);
+	if (*object == NULL) {
+		free(handle, M_DEVBUF);
+		return (EINVAL);
+	}
 
-	if (*object == NULL)
-		 return (EINVAL);
 	return (0);
 }
 

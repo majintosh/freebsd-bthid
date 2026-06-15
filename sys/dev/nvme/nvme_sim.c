@@ -96,6 +96,15 @@ nvme_sim_nvmeio(struct cam_sim *sim, union ccb *ccb)
 	struct nvme_controller *ctrlr;
 
 	ctrlr = sim2ctrlr(sim);
+
+	if (ctrlr->max_identify_cns != 0 &&
+	    nvmeio->cmd.opc == NVME_OPC_IDENTIFY &&
+	    (le32toh(nvmeio->cmd.cdw10) & 0xff) > ctrlr->max_identify_cns) {
+		nvmeio->ccb_h.status = CAM_REQ_INVALID;
+		xpt_done(ccb);
+		return;
+	}
+
 	payload = nvmeio->data_ptr;
 	size = nvmeio->dxfer_len;
 	/* SG LIST ??? */
@@ -208,7 +217,7 @@ nvme_sim_action(struct cam_sim *sim, union ccb *ccb)
 		cpi->xport_specific.nvme.bus = pci_get_bus(dev);
 		cpi->xport_specific.nvme.slot = pci_get_slot(dev);
 		cpi->xport_specific.nvme.function = pci_get_function(dev);
-		cpi->xport_specific.nvme.progif = pci_get_progif(dev);
+		cpi->xport_specific.nvme.extra = 0;
 		strlcpy(cpi->xport_specific.nvme.dev_name, device_get_nameunit(dev),
 		    sizeof(cpi->xport_specific.nvme.dev_name));
 		cpi->hba_vendor = pci_get_vendor(dev);
@@ -313,13 +322,6 @@ static int
 nvme_sim_probe(device_t dev)
 {
 	if (nvme_use_nvd)
-		return (ENXIO);
-	/*
-	 * Only do storage devices with CAM. NVMHCI 1.0 interfaces are the only
-	 * ones that have namespaces with LBA ranges on them.
-	 */
-	if (pci_get_progif(device_get_parent(dev)) !=
-	    PCIP_STORAGE_NVM_ENTERPRISE_NVMHCI_1_0)
 		return (ENXIO);
 
 	device_set_desc(dev, "nvme cam");

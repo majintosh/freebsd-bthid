@@ -100,8 +100,6 @@ struct ieee80211_mmie_16 {
 
 #define	IEEE80211_MAX_RTS_THRESHOLD		2346	/* net80211::IEEE80211_RTS_MAX */
 
-#define	IEEE80211_MIN_ACTION_SIZE		23	/* ? */
-
 /* Wi-Fi Peer-to-Peer (P2P) Technical Specification */
 #define	IEEE80211_P2P_OPPPS_CTWINDOW_MASK	0x7f
 #define	IEEE80211_P2P_OPPPS_ENABLE_BIT		BIT(7)
@@ -468,9 +466,20 @@ enum ieee80211_tx_info_flags {
 	IEEE80211_TX_CTL_STBC			= BIT(20),
 } __packed;
 
+#define	IEEE80211_TX_INFO_FLAGS						\
+    "\010\1CTL_AMPDU\2CTL_ASSIGN_SEQ\3CTL_NO_ACK\4CTL_SEND_AFTER_DTIM"	\
+    "\5CTL_TX_OFFCHAN\6CTL_REQ_TX_STATUS"				\
+    "\7STATUS_EOSP\10STAT_ACK\11STAT_AMPDU\12STAT_AMPDU_NO_BACK"	\
+    "\13STAT_TX_FILTERED\14STAT_NOACK_TRANSMITTED"			\
+    "\15CTL_FIRST_FRAGMENT\16INTFL_DONT_ENCRYPT\17CTL_NO_CCK_RATE"	\
+    "\20CTL_INJECTED\21CTL_HW_80211_ENCAP\22CTL_USE_MINRATE"		\
+    "\23CTL_RATE_CTRL_PROBE\24CTL_LDPC\25CTL_STBC"
+
 enum ieee80211_tx_status_flags {
 	IEEE80211_TX_STATUS_ACK_SIGNAL_VALID	= BIT(0),
 };
+#define	IEEE80211_TX_STATUS_FLAGS					\
+    "\010\1ACK_SIGNAL_VALID"
 
 enum ieee80211_tx_control_flags {
 	/* XXX TODO .. right shift numbers */
@@ -621,6 +630,8 @@ struct ieee80211_mgmt {
 		DECLARE_FLEX_ARRAY(uint8_t, body);
 	} u;
 } __packed __aligned(2);
+
+#define	IEEE80211_MIN_ACTION_SIZE	offsetof(struct ieee80211_mgmt, u.action.u)
 
 struct ieee80211_cts {		/* net80211::ieee80211_frame_cts */
         __le16		frame_control;

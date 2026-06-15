@@ -28,6 +28,7 @@
 #define	_SYS_KTLS_H_
 
 #ifdef _KERNEL
+#include <sys/mbuf.h>
 #include <sys/_null.h>
 #include <sys/refcount.h>
 #include <sys/_task.h>
@@ -241,6 +242,7 @@ typedef enum {
 	KTLS_MBUF_CRYPTO_ST_MIXED = 0,
 	KTLS_MBUF_CRYPTO_ST_ENCRYPTED = 1,
 	KTLS_MBUF_CRYPTO_ST_DECRYPTED = -1,
+	KTLS_MBUF_CRYPTO_ST_SHAREDMBUF = -2,
 } ktls_mbuf_crypto_st_t;
 
 void ktls_check_rx(struct sockbuf *sb);
@@ -283,6 +285,17 @@ ktls_free(struct ktls_session *tls)
 
 	if (refcount_release(&tls->refcount))
 		ktls_destroy(tls);
+}
+
+static inline void
+ktls_release_snd_tag(struct ktls_session *tls)
+{
+	struct m_snd_tag *mst;
+
+	mst = tls->snd_tag;
+	tls->snd_tag = NULL;
+	if (mst != NULL)
+		m_snd_tag_rele(mst);
 }
 
 void ktls_session_to_xktls_onedir(const struct ktls_session *ks,

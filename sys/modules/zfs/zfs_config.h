@@ -204,6 +204,9 @@
 /* DECLARE_EVENT_CLASS() is available */
 /* #undef HAVE_DECLARE_EVENT_CLASS */
 
+/* dentry aliases are in d_u member */
+/* #undef HAVE_DENTRY_D_U_ALIASES */
+
 /* 3-arg dequeue_signal() takes a type argument */
 /* #undef HAVE_DEQUEUE_SIGNAL_3ARG_TYPE */
 
@@ -254,6 +257,9 @@
 
 /* fs_context exists */
 /* #undef HAVE_FS_CONTEXT */
+
+/* fs_parse() takes fs_parameter_spec directly */
+/* #undef HAVE_FS_PARSE_TAKES_SPEC */
 
 /* yes */
 /* #undef HAVE_GENERIC_FADVISE */
@@ -576,6 +582,12 @@
 /* proc_ops structure exists */
 /* #undef HAVE_PROC_OPS_STRUCT */
 
+/* Define if you have POSIX threads libraries and header files. */
+#define HAVE_PTHREAD 1
+
+/* Have PTHREAD_PRIO_INHERIT. */
+#define HAVE_PTHREAD_PRIO_INHERIT 1
+
 /* If available, contains the Python version number currently in use. */
 /* #undef HAVE_PYTHON */
 
@@ -878,6 +890,10 @@
 /* make_request_fn() return type */
 /* #undef MAKE_REQUEST_FN_RET */
 
+/* Define to necessary symbol if this constant uses a non-standard name on
+   your system. */
+/* #undef PTHREAD_CREATE_JOINABLE */
+
 /* The size of 'off_t', as computed by sizeof. */
 /* #undef SIZEOF_OFF_T */
 
@@ -911,7 +927,7 @@
 /* #undef ZFS_DEVICE_MINOR */
 
 /* Define the project alias string. */
-#define ZFS_META_ALIAS "zfs-2.4.99-468-FreeBSD_g3ee08abd2"
+#define ZFS_META_ALIAS "zfs-2.4.99-695-FreeBSD_ga170134fe"
 
 /* Define the project author. */
 #define ZFS_META_AUTHOR "OpenZFS"
@@ -920,7 +936,7 @@
 /* #undef ZFS_META_DATA */
 
 /* Define the maximum compatible kernel version. */
-#define ZFS_META_KVER_MAX "6.19"
+#define ZFS_META_KVER_MAX "7.0"
 
 /* Define the minimum compatible kernel version. */
 #define ZFS_META_KVER_MIN "4.18"
@@ -941,7 +957,7 @@
 #define ZFS_META_NAME "zfs"
 
 /* Define the project release. */
-#define ZFS_META_RELEASE "468-FreeBSD_g3ee08abd2"
+#define ZFS_META_RELEASE "695-FreeBSD_ga170134fe"
 
 /* Define the project version. */
 #define ZFS_META_VERSION "2.4.99"

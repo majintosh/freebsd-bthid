@@ -127,12 +127,13 @@ __DEFAULT_YES_OPTIONS = \
     LLVM_COV \
     LOADER_BIOS_TEXTONLY \
     LOADER_GELI \
+    LOADER_IA32 \
     LOADER_KBOOT \
     LOADER_LUA \
     LOADER_OFW \
     LOADER_PXEBOOT \
     LOADER_UBOOT \
-    LOADER_IA32 \
+    LOADER_ZFS \
     LOCALES \
     LOCATE \
     LPR \
@@ -156,6 +157,7 @@ __DEFAULT_YES_OPTIONS = \
     PAM \
     PF \
     PKGBOOTSTRAP \
+    PKGCONF \
     PKGSERVE \
     PMC \
     PPP \
@@ -192,7 +194,6 @@ __DEFAULT_YES_OPTIONS = \
     WPA_SUPPLICANT_EAPOL \
     ZFS \
     ZFS_TESTS \
-    LOADER_ZFS \
     ZONEINFO
 
 __DEFAULT_NO_OPTIONS = \
@@ -201,17 +202,18 @@ __DEFAULT_NO_OPTIONS = \
     CLANG_EXTRAS \
     CLANG_FORMAT \
     CLEAN \
-    DIALOG \
     DETECT_TZ_CHANGES \
+    DIALOG \
     DISK_IMAGE_TOOLS_BOOTSTRAP \
     DTRACE_ASAN \
     DTRACE_TESTS \
     HESIOD \
     IPFILTER_IPFS \
-    LOADER_VERBOSE \
-    LOADER_VERIEXEC_PASS_MANIFEST \
     LLVM_FULL_DEBUGINFO \
     LLVM_LINK_STATIC_LIBRARIES \
+    LOADER_USB \
+    LOADER_VERBOSE \
+    LOADER_VERIEXEC_PASS_MANIFEST \
     MALLOC_PRODUCTION \
     OFED_EXTRA \
     OPENLDAP \
@@ -344,8 +346,8 @@ BROKEN_OPTIONS+=LOADER_IA32
 BROKEN_OPTIONS+=LOADER_GELI LOADER_LUA
 .endif
 
-# Kernel TLS is enabled by default on amd64, aarch64 and powerpc64*
-.if ${__T} == "aarch64" || ${__T} == "amd64" || ${__T:Mpowerpc64*} != ""
+# Kernel TLS is enabled by default on amd64, aarch64, powerpc64*, and riscv64*
+.if ${__T} == "aarch64" || ${__T} == "amd64" || ${__T:Mpowerpc64*} != "" || ${__T:Mriscv64*} != ""
 __DEFAULT_YES_OPTIONS+=OPENSSL_KTLS
 .else
 __DEFAULT_NO_OPTIONS+=OPENSSL_KTLS
@@ -427,6 +429,8 @@ MK_KERBEROS_SUPPORT:=	no
 MK_MITKRB5:=	no
 .endif
 
+# MK_DTRACE also gates ctf tools, so we cannot build userland with CTF
+# if it is off.
 .if ${MK_DTRACE} == "no"
 MK_CTF:=	no
 .endif

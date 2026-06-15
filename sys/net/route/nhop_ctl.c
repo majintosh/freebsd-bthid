@@ -149,13 +149,17 @@ get_aifp(const struct nhop_object *nh)
 }
 
 int
-cmp_priv(const struct nhop_priv *_one, const struct nhop_priv *_two)
+cmp_priv(const struct nhop_priv *key, const struct nhop_priv *search)
 {
 
-	if (memcmp(_one->nh, _two->nh, NHOP_END_CMP) != 0)
+	if (memcmp(key->nh, search->nh, NHOP_END_CMP) != 0)
 		return (0);
 
-	if (memcmp(_one, _two, NH_PRIV_END_CMP) != 0)
+	if (memcmp(key, search, NH_PRIV_END_CMP) != 0)
+		return (0);
+
+	if (key->nh_metric != RT_WILDCARD_METRIC &&
+	    key->nh_metric != search->nh_metric)
 		return (0);
 
 	return (1);
@@ -169,6 +173,19 @@ set_nhop_mtu_from_info(struct nhop_object *nh, const struct rt_addrinfo *info)
 {
 	if (info->rti_mflags & RTV_MTU)
 		nhop_set_mtu(nh, info->rti_rmx->rmx_mtu, true);
+}
+
+static void
+set_nhop_metric_from_info(struct nhop_object *nh, const struct rt_addrinfo *info)
+{
+	uint32_t metric;
+
+	if (info->rti_mflags & RTV_METRIC)
+		metric = info->rti_rmx->rmx_metric;
+	else
+		metric = RT_DEFAULT_METRIC;
+
+	nhop_set_metric(nh, metric);
 }
 
 /*
@@ -288,6 +305,7 @@ nhop_create_from_info(struct rib_head *rnh, struct rt_addrinfo *info,
 	nhop_set_rtflags(nh, info->rti_flags);
 
 	set_nhop_mtu_from_info(nh, info);
+	set_nhop_metric_from_info(nh, info);
 	nhop_set_src(nh, info->rti_ifa);
 
 	/*
@@ -451,6 +469,7 @@ nhop_create_from_nhop(struct rib_head *rnh, const struct nhop_object *nh_orig,
 		nhop_free(nh);
 		return (error);
 	}
+	set_nhop_expire_from_info(nh, info);
 
 	*pnh = nhop_get_nhop(nh, &error);
 
@@ -491,17 +510,17 @@ finalize_nhop(struct nh_control *ctl, struct nhop_object *nh, bool link)
 	/* Allocate per-cpu packet counter */
 	nh->nh_pksent = counter_u64_alloc(M_NOWAIT);
 	if (nh->nh_pksent == NULL) {
+		FIB_NH_LOG(LOG_WARNING, nh, "counter_u64_alloc() failed");
 		nhop_free(nh);
 		RTSTAT_INC(rts_nh_alloc_failure);
-		FIB_NH_LOG(LOG_WARNING, nh, "counter_u64_alloc() failed");
 		return (ENOMEM);
 	}
 
 	if (!reference_nhop_deps(nh)) {
+		FIB_NH_LOG(LOG_WARNING, nh, "interface reference failed");
 		counter_u64_free(nh->nh_pksent);
 		nhop_free(nh);
 		RTSTAT_INC(rts_nh_alloc_failure);
-		FIB_NH_LOG(LOG_WARNING, nh, "interface reference failed");
 		return (EAGAIN);
 	}
 
@@ -1041,6 +1060,21 @@ void
 nhop_set_origin(struct nhop_object *nh, uint8_t origin)
 {
 	nh->nh_priv->nh_origin = origin;
+}
+
+uint32_t
+nhop_get_metric(const struct nhop_object *nh)
+{
+	return (nh->nh_priv->nh_metric);
+}
+
+void
+nhop_set_metric(struct nhop_object *nh, uint32_t metric)
+{
+	if (metric != RT_WILDCARD_METRIC)
+		nh->nh_priv->nh_metric = metric;
+	else
+		nh->nh_priv->nh_metric = RT_DEFAULT_METRIC;
 }
 
 void

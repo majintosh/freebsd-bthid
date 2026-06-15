@@ -77,11 +77,30 @@ snd_setup_intr(device_t dev, struct resource *res, int flags, driver_intr_t hand
 	return bus_setup_intr(dev, res, flags, NULL, hand, param, cookiep);
 }
 
+static void
+pcm_hotswap(void)
+{
+	struct snddev_info *d;
+	char buf[32];
+
+	bus_topo_assert();
+	if (snd_unit >= 0) {
+		d = devclass_get_softc(pcm_devclass, snd_unit);
+		if (!PCM_REGISTERED(d))
+			return;
+		snprintf(buf, sizeof(buf), "cdev=dsp%d", snd_unit);
+		if (d->reccount > 0)
+			devctl_notify("SND", "CONN", "IN", buf);
+		if (d->playcount > 0)
+			devctl_notify("SND", "CONN", "OUT", buf);
+	} else
+		devctl_notify("SND", "CONN", "NODEV", NULL);
+}
+
 static int
 sysctl_hw_snd_default_unit(SYSCTL_HANDLER_ARGS)
 {
 	struct snddev_info *d;
-	char buf[32];
 	int error, unit;
 
 	unit = snd_unit;
@@ -95,13 +114,8 @@ sysctl_hw_snd_default_unit(SYSCTL_HANDLER_ARGS)
 		}
 		snd_unit = unit;
 		snd_unit_auto = 0;
+		pcm_hotswap();
 		bus_topo_unlock();
-
-		snprintf(buf, sizeof(buf), "cdev=dsp%d", snd_unit);
-		if (d->reccount > 0)
-			devctl_notify("SND", "CONN", "IN", buf);
-		if (d->playcount > 0)
-			devctl_notify("SND", "CONN", "OUT", buf);
 	}
 	return (error);
 }
@@ -242,7 +256,6 @@ pcm_getdevinfo(device_t dev)
 unsigned int
 pcm_getbuffersize(device_t dev, unsigned int minbufsz, unsigned int deflt, unsigned int maxbufsz)
 {
-	struct snddev_info *d = device_get_softc(dev);
 	int sz, x;
 
 	sz = 0;
@@ -263,8 +276,6 @@ pcm_getbuffersize(device_t dev, unsigned int minbufsz, unsigned int deflt, unsig
 	} else {
 		sz = deflt;
 	}
-
-	d->bufsz = sz;
 
 	return sz;
 }
@@ -376,6 +387,7 @@ int
 pcm_register(device_t dev, char *str)
 {
 	struct snddev_info *d = device_get_softc(dev);
+	int err;
 
 	/* should only be called once */
 	if (d->flags & SD_F_REGISTERED)
@@ -406,12 +418,6 @@ pcm_register(device_t dev, char *str)
 	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO, "rec",
 	    CTLFLAG_RD | CTLFLAG_MPSAFE, 0, "recording channels node");
 
-	/* XXX: a user should be able to set this with a control tool, the
-	   sysadmin then needs min+max sysctls for this */
-	SYSCTL_ADD_UINT(device_get_sysctl_ctx(dev),
-	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)),
-            OID_AUTO, "buffersize", CTLFLAG_RD, &d->bufsz, 0,
-	    "allocated buffer size");
 	SYSCTL_ADD_PROC(device_get_sysctl_ctx(dev),
 	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO,
 	    "bitperfect", CTLTYPE_INT | CTLFLAG_RWTUN | CTLFLAG_MPSAFE, d,
@@ -424,9 +430,15 @@ pcm_register(device_t dev, char *str)
 	    "mode (1=mixer, 2=play, 4=rec. The values are OR'ed if more than "
 	    "one mode is supported)");
 	vchan_initsys(dev);
-	if (d->flags & SD_F_EQ)
-		feeder_eq_initsys(dev);
+	feeder_eq_initsys(dev);
 
+	sndstat_register(dev, SNDST_TYPE_PCM, d->status);
+
+	err = dsp_make_dev(dev);
+	if (err)
+		return (err);
+
+	bus_topo_lock();
 	if (snd_unit_auto < 0)
 		snd_unit_auto = (snd_unit < 0) ? 1 : 0;
 	if (snd_unit < 0 || snd_unit_auto > 1)
@@ -434,9 +446,11 @@ pcm_register(device_t dev, char *str)
 	else if (snd_unit_auto == 1)
 		snd_unit = pcm_best_unit(snd_unit);
 
-	sndstat_register(dev, SNDST_TYPE_PCM, d->status);
+	if (snd_unit == device_get_unit(dev))
+		pcm_hotswap();
+	bus_topo_unlock();
 
-	return (dsp_make_dev(dev));
+	return (0);
 }
 
 int
@@ -479,13 +493,14 @@ pcm_unregister(device_t dev)
 	cv_destroy(&d->cv);
 	mtx_destroy(&d->lock);
 
+	bus_topo_lock();
 	if (snd_unit == device_get_unit(dev)) {
 		snd_unit = pcm_best_unit(-1);
 		if (snd_unit_auto == 0)
 			snd_unit_auto = 1;
-		if (snd_unit < 0)
-			devctl_notify("SND", "CONN", "NODEV", NULL);
+		pcm_hotswap();
 	}
+	bus_topo_unlock();
 
 	return (0);
 }

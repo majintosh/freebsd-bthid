@@ -40,6 +40,7 @@
 #include <sys/pmc.h>
 #include <sys/pmckern.h>
 #include <sys/smp.h>
+#include <sys/sysctl.h>
 #include <sys/systm.h>
 
 #include <machine/cpu.h>
@@ -177,6 +178,63 @@ struct amd_cpu {
 	struct pmc_hw	pc_amdpmcs[AMD_NPMCS_MAX];
 };
 static struct amd_cpu **amd_pcpu;
+
+/* Populated by amd_init_policy(); PRECISERETIRE is OR-ed in per-allocation. */
+static uint64_t amd_core_allowed_mask;
+static uint64_t amd_l3_allowed_mask;
+static uint64_t amd_df_allowed_mask;
+
+static uint64_t amd_core_extra_mask;
+static uint64_t amd_l3_extra_mask;
+static uint64_t amd_df_extra_mask;
+
+SYSCTL_DECL(_kern_hwpmc);
+
+SYSCTL_U64(_kern_hwpmc, OID_AUTO, amd_core_extra_mask, CTLFLAG_RDTUN,
+    &amd_core_extra_mask, 0,
+    "Extra allowed bits in AMD core PMU PERFEVTSEL (override; default 0)");
+
+SYSCTL_U64(_kern_hwpmc, OID_AUTO, amd_l3_extra_mask, CTLFLAG_RDTUN,
+    &amd_l3_extra_mask, 0,
+    "Extra allowed bits in AMD L3 PMU control (override; default 0)");
+
+SYSCTL_U64(_kern_hwpmc, OID_AUTO, amd_df_extra_mask, CTLFLAG_RDTUN,
+    &amd_df_extra_mask, 0,
+    "Extra allowed bits in AMD DF PMU control (override; default 0)");
+
+static void
+amd_init_policy(void)
+{
+	int family;
+
+	family = CPUID_TO_FAMILY(cpu_id);
+
+	amd_core_allowed_mask = AMD_VALID_BITS;
+
+	amd_l3_allowed_mask = (family <= 0x17) ?
+	    AMD_PMC_L3_FAMILY17_MASK : AMD_PMC_L3_FAMILY19_MASK;
+
+	amd_df_allowed_mask = (family <= 0x19) ?
+	    AMD_PMC_DF_FAMILY17_MASK : AMD_PMC_DF_FAMILY1A_MASK;
+}
+
+static uint64_t
+amd_config_mask(enum sub_class subclass, uint64_t caps)
+{
+
+	switch (subclass) {
+	case PMC_AMD_SUB_CLASS_CORE:
+		return (amd_core_allowed_mask | amd_core_extra_mask |
+		    (((caps & PMC_CAP_PRECISE) != 0) ?
+		    AMD_PMC_PRECISERETIRE : 0));
+	case PMC_AMD_SUB_CLASS_L3_CACHE:
+		return (amd_l3_allowed_mask | amd_l3_extra_mask);
+	case PMC_AMD_SUB_CLASS_DATA_FABRIC:
+		return (amd_df_allowed_mask | amd_df_extra_mask);
+	default:
+		return (0);
+	}
+}
 
 /*
  * Read a PMC value from the MSR.
@@ -358,9 +416,13 @@ amd_allocate_pmc(int cpu __unused, int ri, struct pmc *pm,
 		return (EINVAL);
 
 	if (strlen(pmc_cpuid) != 0) {
-		pm->pm_md.pm_amd.pm_amd_evsel = a->pm_md.pm_amd.pm_amd_config;
-		PMCDBG2(MDP, ALL, 2,"amd-allocate ri=%d -> config=0x%x", ri,
-		    a->pm_md.pm_amd.pm_amd_config);
+		config = a->pm_md.pm_amd.pm_amd_config;
+		if ((config & ~amd_config_mask(amd_pmcdesc[ri].pm_subclass,
+		    caps)) != 0)
+			return (EINVAL);
+		pm->pm_md.pm_amd.pm_amd_evsel = config;
+		PMCDBG2(MDP, ALL, 2, "amd-allocate ri=%d -> config=0x%jx",
+		    ri, (uintmax_t)config);
 		return (0);
 	}
 
@@ -807,12 +869,14 @@ amd_pcpu_fini(struct pmc_mdep *md, int cpu)
 struct pmc_mdep *
 pmc_amd_initialize(void)
 {
+	struct amd_descr *d;
 	struct pmc_classdep *pcd;
 	struct pmc_mdep *pmc_mdep;
+	uint64_t reg;
 	enum pmc_cputype cputype;
-	int error, i, ncpus, nclasses;
+	int ncpus, nclasses, i;
 	int family, model, stepping;
-	struct amd_descr *d;
+	int error;
 
 	/*
 	 * The presence of hardware performance counters on the AMD
@@ -841,6 +905,37 @@ pmc_amd_initialize(void)
 		printf("pmc: Unknown AMD CPU %x %d-%d.\n", cpu_id, family,
 		    model);
 		return (NULL);
+	}
+
+	/*
+	 * Unforunately, there is no way to communicate that the original four
+	 * core counters are disabled through CPUIDs alone.  We attempt to
+	 * write and read back the MSR to validate that it is working.
+	 *
+	 * Referenced the BIOS and Kernel Developer Guide for AMD Athlon 64 and
+	 * AMD Opteron Processors 26094 Rev. 3.24 January, 2005 to ensure these
+	 * fields are valid.
+	 */
+	if ((amd_feature2 & AMDID2_PCXC) == 0) {
+		error = wrmsr_safe(AMD_PMC_EVSEL_0, AMD_PMC_OS | AMD_PMC_USR);
+		if (error != 0) {
+			printf("hwpmc: AMD evsel 0 wrmsr failed!\n");
+			return (NULL);
+		}
+
+		error = rdmsr_safe(AMD_PMC_EVSEL_0, &reg);
+		if (error != 0) {
+			printf("hwpmc: AMD evsel 0 rdmsr failed!\n");
+			return (NULL);
+		}
+
+		if (reg == 0) {
+			printf("hwpmc: AMD evsel returned invalid value! "
+			    "You may be in a VM without PMC support.\n");
+			return (NULL);
+		}
+
+		wrmsr(AMD_PMC_EVSEL_0, 0);
 	}
 
 	/*
@@ -980,6 +1075,8 @@ pmc_amd_initialize(void)
 	pmc_mdep->pmd_switch_out = amd_switch_out;
 
 	pmc_mdep->pmd_npmc	+= amd_npmcs;
+
+	amd_init_policy();
 
 	PMCDBG0(MDP, INI, 0, "amd-initialize");
 

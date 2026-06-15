@@ -666,18 +666,19 @@ acpi_attach(device_t dev)
 
     /*
      * Pick the first valid sleep type for the sleep button default.  If that
-     * type was hibernate and we support s2idle, set it to that.  The sleep
-     * button prefers s2mem instead of s2idle at the moment as s2idle may not
-     * yet work reliably on all machines.  In the future, we should set this to
-     * s2idle when ACPI_FADT_LOW_POWER_S0 is set.
+     * type was hibernate and we support suspend_to_idle , set it to that.  The
+     * sleep button prefers fw_suspend instead of suspend_to_idle at the moment
+     * as suspend_to_idle may not yet work reliably on all machines. In the
+     * future, we should set this to suspend_to_idle when
+     * ACPI_FADT_LOW_POWER_S0 is set.
      */
     sc->acpi_sleep_button_stype = POWER_STYPE_UNKNOWN;
-    for (stype = POWER_STYPE_STANDBY; stype <= POWER_STYPE_HIBERNATE; stype++)
+    for (stype = POWER_STYPE_STANDBY; stype <= POWER_STYPE_FW_HIBERNATE; stype++)
 	if (acpi_supported_stypes[stype]) {
 	    sc->acpi_sleep_button_stype = stype;
 	    break;
 	}
-    if (sc->acpi_sleep_button_stype == POWER_STYPE_HIBERNATE ||
+    if (sc->acpi_sleep_button_stype == POWER_STYPE_FW_HIBERNATE ||
 	sc->acpi_sleep_button_stype == POWER_STYPE_UNKNOWN) {
 	if (acpi_supported_stypes[POWER_STYPE_SUSPEND_TO_IDLE])
 	    sc->acpi_sleep_button_stype = POWER_STYPE_SUSPEND_TO_IDLE;
@@ -743,7 +744,7 @@ acpi_attach(device_t dev)
 	OID_AUTO, "lid_switch_state",
 	CTLTYPE_STRING | CTLFLAG_RW | CTLFLAG_MPSAFE,
 	&sc->acpi_lid_switch_stype, 0, acpi_stype_sysctl, "A",
-	"Lid ACPI sleep state. Set to s2idle or s2mem if you want to suspend "
+	"Lid ACPI sleep state. Set to suspend_to_idle or fw_suspend if you want to suspend "
 	"your laptop when you close the lid.");
     SYSCTL_ADD_PROC(&sc->acpi_sysctl_ctx, SYSCTL_CHILDREN(sc->acpi_sysctl_tree),
 	OID_AUTO, "suspend_state", CTLTYPE_STRING | CTLFLAG_RW | CTLFLAG_MPSAFE,
@@ -816,9 +817,9 @@ acpi_stype_to_sstate(struct acpi_softc *sc, enum power_stype stype)
 		return (ACPI_STATE_S0);
 	case POWER_STYPE_STANDBY:
 		return (sc->acpi_standby_sx);
-	case POWER_STYPE_SUSPEND_TO_MEM:
+	case POWER_STYPE_FW_SUSPEND:
 		return (ACPI_STATE_S3);
-	case POWER_STYPE_HIBERNATE:
+	case POWER_STYPE_FW_HIBERNATE:
 		return (ACPI_STATE_S4);
 	case POWER_STYPE_POWEROFF:
 		return (ACPI_STATE_S5);
@@ -851,9 +852,9 @@ acpi_sstate_to_stype(int sstate)
 	case ACPI_STATE_S2:
 		return (POWER_STYPE_STANDBY);
 	case ACPI_STATE_S3:
-		return (POWER_STYPE_SUSPEND_TO_MEM);
+		return (POWER_STYPE_FW_SUSPEND);
 	case ACPI_STATE_S4:
-		return (POWER_STYPE_HIBERNATE);
+		return (POWER_STYPE_FW_HIBERNATE);
 	case ACPI_STATE_S5:
 		return (POWER_STYPE_POWEROFF);
 	}
@@ -2154,9 +2155,9 @@ acpi_device_pwr_for_sleep_sxd(device_t dev, ACPI_HANDLE handle, int state,
  * we are currently entering (sc->acpi_stype is set in acpi_EnterSleepState
  * before the ACPI bus gets suspended, and thus before this function is called).
  *
- * If entering s2idle, we will try to enter whichever D-state we would've been
- * transitioning to in S3. If we are entering an ACPI S-state, we evaluate the
- * relevant _SxD state instead (ACPI 7.3.16 - 7.3.19).
+ * If entering suspend_to_idle, we will try to enter whichever D-state we
+ * would've been transitioning to in S3. If we are entering an ACPI S-state, we
+ * evaluate the relevant _SxD state instead (ACPI 7.3.16 - 7.3.19).
  */
 int
 acpi_device_pwr_for_sleep(device_t bus, device_t dev, int *dstate)
@@ -3723,8 +3724,8 @@ acpi_EnterSleepState(struct acpi_softc *sc, enum power_stype stype)
     case POWER_STYPE_STANDBY:
 	do_standby(sc, &slp_state, intr);
 	break;
-    case POWER_STYPE_SUSPEND_TO_MEM:
-    case POWER_STYPE_HIBERNATE:
+    case POWER_STYPE_FW_SUSPEND:
+    case POWER_STYPE_FW_HIBERNATE:
 	do_sleep(sc, &slp_state, intr, acpi_sstate);
 	break;
     case POWER_STYPE_SUSPEND_TO_IDLE:
@@ -4609,7 +4610,7 @@ acpi_sleep_state_sysctl(SYSCTL_HANDLER_ARGS)
 static int
 acpi_stype_sysctl(SYSCTL_HANDLER_ARGS)
 {
-    char name[10];
+    char name[POWER_STYPE_NAME_LEN];
     int err;
     int sstate;
     enum power_stype new_stype, old_stype;
@@ -5064,7 +5065,7 @@ acpi_pm_func(u_long cmd, void *arg, enum power_stype stype)
 			error = EINVAL;
 			goto out;
 		}
-		if (ACPI_FAILURE(acpi_EnterSleepState(sc, stype)))
+		if (ACPI_FAILURE(acpi_ReqSleepState(sc, stype)))
 			error = ENXIO;
 		break;
 	default:

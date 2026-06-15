@@ -229,6 +229,9 @@ device		ppi			# Parallel port interface device
 
 device		puc			# Multi I/O cards and multi-channel UARTs
 
+# MDIO bus for Ethernet NICs that directly expose the MDIO bus
+device		mdio
+
 # PCI/PCI-X/PCIe Ethernet NICs that use iflib infrastructure
 device		iflib
 device		em			# Intel PRO/1000 Gigabit Ethernet Family
@@ -326,6 +329,7 @@ device		xz			# lzma decompression
 device		bpf			# Berkeley packet filter
 
 # random(4)
+device		padlock_rng		# VIA Padlock RNG
 device		rdrand_rng		# Intel Bull Mountain RNG
 # Disabled for now since tpm(4) breaks suspend/resume.
 #device		tpm			# Trusted Platform Module
@@ -339,6 +343,7 @@ device		uhci			# UHCI PCI->USB interface
 device		ohci			# OHCI PCI->USB interface
 device		ehci			# EHCI PCI->USB interface (USB 2.0)
 device		xhci			# XHCI PCI->USB interface (USB 3.0)
+device		thunderbolt		# Thunderbolt PCI->USB interface (USB 4.0)
 device		usb			# USB Bus (required)
 device		usbhid			# USB HID Transport
 device		hkbd			# HID Keyboard

@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2011 NetApp, Inc.
+ * Copyright (c) 2026 Hans Rosenfeld
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -356,18 +357,12 @@ calc_topology(void)
 		guest_ncpus = ncpus;
 }
 
-int
-bhyve_pincpu_parse(const char *opt)
+static int
+bhyve_pincpu(int vcpu, int pcpu)
 {
 	const char *value;
 	char *newval;
 	char key[16];
-	int vcpu, pcpu;
-
-	if (sscanf(opt, "%d:%d", &vcpu, &pcpu) != 2) {
-		fprintf(stderr, "invalid format: %s\n", opt);
-		return (-1);
-	}
 
 	if (vcpu < 0) {
 		fprintf(stderr, "invalid vcpu '%d'\n", vcpu);
@@ -392,6 +387,34 @@ bhyve_pincpu_parse(const char *opt)
 	set_config_value(key, newval);
 	free(newval);
 	return (0);
+}
+
+int
+bhyve_pincpu_parse(const char *opt)
+{
+	int vcpu_first, vcpu_last, pcpu_first, pcpu_last;
+	int vcpu, pcpu;
+
+	if (sscanf(opt, "%d-%d:%d-%d", &vcpu_first, &vcpu_last, &pcpu_first, &pcpu_last) == 4) {
+		if (vcpu_first > vcpu_last || pcpu_first > pcpu_last) {
+			fprintf(stderr, "invalid range (must be ascending): %s\n", opt);
+			return (-1);
+		}
+		if ((vcpu_last - vcpu_first) != (pcpu_last - pcpu_first)) {
+			fprintf(stderr, "range sizes do not match: %s\n", opt);
+			return (-1);
+		}
+		for (vcpu = vcpu_first, pcpu = pcpu_first; vcpu <= vcpu_last; vcpu++, pcpu++)
+			if (bhyve_pincpu(vcpu, pcpu) != 0)
+				return (-1);
+		return (0);
+	}
+
+	if (sscanf(opt, "%d:%d", &vcpu, &pcpu) == 2)
+		return (bhyve_pincpu(vcpu, pcpu));
+
+	fprintf(stderr, "invalid format: %s\n", opt);
+	return (-1);
 }
 
 static void
@@ -917,6 +940,12 @@ main(int argc, char *argv[])
 	}
 
 	bsp = vm_vcpu_open(ctx, BSP);
+	if (bsp == NULL) {
+		fprintf(stderr, "Unable to open boot VCPU: %s",
+		    strerror(errno));
+		exit(BHYVE_EXIT_ERROR);
+	}
+
 	max_vcpus = num_vcpus_allowed(ctx, bsp);
 	if (guest_ncpus > max_vcpus) {
 		fprintf(stderr, "%d vCPUs requested but only %d available\n",
@@ -935,6 +964,12 @@ main(int argc, char *argv[])
 			vcpu_info[vcpuid].vcpu = bsp;
 		else
 			vcpu_info[vcpuid].vcpu = vm_vcpu_open(ctx, vcpuid);
+
+		if (vcpu_info[vcpuid].vcpu == NULL) {
+			fprintf(stderr, "Unable to open VCPU %d: %s", vcpuid,
+			    strerror(errno));
+			exit(BHYVE_EXIT_ERROR);
+		}
 	}
 
 	if (bhyve_init_platform(ctx, bsp) != 0)

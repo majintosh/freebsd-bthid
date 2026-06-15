@@ -111,6 +111,7 @@
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1083,21 +1084,21 @@ ping6(int argc, char *argv[])
 #ifdef IPV6_RECVPKTINFO
 	if (setsockopt(srecv, IPPROTO_IPV6, IPV6_RECVPKTINFO, &optval,
 	    sizeof(optval)) < 0)
-		warn("setsockopt(IPV6_RECVPKTINFO)"); /* XXX err? */
+		err(1, "setsockopt(IPV6_RECVPKTINFO)");
 #else  /* old adv. API */
 	if (setsockopt(srecv, IPPROTO_IPV6, IPV6_PKTINFO, &optval,
 	    sizeof(optval)) < 0)
-		warn("setsockopt(IPV6_PKTINFO)"); /* XXX err? */
+		err(1, "setsockopt(IPV6_PKTINFO)");
 #endif
 #endif /* USE_SIN6_SCOPE_ID */
 #ifdef IPV6_RECVHOPLIMIT
 	if (setsockopt(srecv, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &optval,
 	    sizeof(optval)) < 0)
-		warn("setsockopt(IPV6_RECVHOPLIMIT)"); /* XXX err? */
+		err(1, "setsockopt(IPV6_RECVHOPLIMIT)");
 #else  /* old adv. API */
 	if (setsockopt(srecv, IPPROTO_IPV6, IPV6_HOPLIMIT, &optval,
 	    sizeof(optval)) < 0)
-		warn("setsockopt(IPV6_HOPLIMIT)"); /* XXX err? */
+		err(1, "setsockopt(IPV6_HOPLIMIT)");
 #endif
 
 	cap_rights_clear(&rights_srecv, CAP_SETSOCKOPT);
@@ -1145,7 +1146,7 @@ ping6(int argc, char *argv[])
 		struct timespec now, timeout;
 		struct msghdr m;
 		struct iovec iov[2];
-		fd_set rfds;
+		struct pollfd pfd;
 		int n;
 
 		/* signal handling */
@@ -1154,15 +1155,16 @@ ping6(int argc, char *argv[])
 			seeninfo = 0;
 			continue;
 		}
-		FD_ZERO(&rfds);
-		FD_SET(srecv, &rfds);
+		pfd.fd = srecv;
+		pfd.events = POLLIN;
+		pfd.revents = 0;
 		clock_gettime(CLOCK_MONOTONIC, &now);
 		timespecadd(&last, &intvl, &timeout);
 		timespecsub(&timeout, &now, &timeout);
 		if (timeout.tv_sec < 0)
 			timespecclear(&timeout);
 
-		n = pselect(srecv + 1, &rfds, NULL, NULL, &timeout, NULL);
+		n = ppoll(&pfd, 1, &timeout, NULL);
 		if (n < 0)
 			continue;	/* EINTR */
 		if (n == 1) {

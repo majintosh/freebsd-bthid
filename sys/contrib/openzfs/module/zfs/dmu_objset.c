@@ -1859,7 +1859,7 @@ do_userquota_cacheflush(objset_t *os, userquota_cache_t *cache, dmu_tx_t *tx)
 	    &cookie)) != NULL) {
 		/*
 		 * os_userused_lock protects against concurrent calls to
-		 * zap_increment_int().  It's needed because zap_increment_int()
+		 * zap_increment().  It's needed because zap_increment()
 		 * is not thread-safe (i.e. not atomic).
 		 */
 		mutex_enter(&os->os_userused_lock);
@@ -3011,7 +3011,7 @@ dmu_objset_get_user(objset_t *os)
 int
 dmu_fsname(const char *snapname, char *buf)
 {
-	char *atp = strchr(snapname, '@');
+	const char *atp = strchr(snapname, '@');
 	if (atp == NULL)
 		return (SET_ERROR(EINVAL));
 	if (atp - snapname >= ZFS_MAX_DATASET_NAME_LEN)

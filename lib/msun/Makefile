@@ -76,9 +76,11 @@ COMMON_SRCS= b_tgamma.c \
 	s_finite.c s_finitef.c \
 	s_floor.c s_floorf.c s_fma.c s_fmaf.c \
 	s_fmax.c s_fmaxf.c s_fmaximum.c s_fmaximumf.c \
-	s_fmaximum_mag.c s_fmaximum_magf.c s_fmaximum_num.c s_fmaximum_numf.c \
+	s_fmaximum_mag.c s_fmaximum_magf.c s_fmaximum_mag_num.c \
+	s_fmaximum_mag_numf.c s_fmaximum_num.c s_fmaximum_numf.c \
 	s_fmin.c s_fminf.c s_fminimum.c s_fminimumf.c \
-	s_fminimum_mag.c s_fminimum_magf.c s_fminimum_num.c s_fminimum_numf.c \
+	s_fminimum_mag.c s_fminimum_magf.c s_fminimum_mag_num.c \
+	s_fminimum_mag_numf.c s_fminimum_num.c s_fminimum_numf.c \
 	s_frexp.c s_frexpf.c s_ilogb.c s_ilogbf.c \
 	s_ilogbl.c s_isfinite.c s_isnan.c s_isnormal.c \
 	s_llrint.c s_llrintf.c s_llround.c s_llroundf.c s_llroundl.c \
@@ -86,7 +88,7 @@ COMMON_SRCS= b_tgamma.c \
 	s_lround.c s_lroundf.c s_lroundl.c s_modff.c \
 	s_nan.c s_nearbyint.c s_nextafter.c s_nextafterf.c \
 	s_nexttowardf.c s_remquo.c s_remquof.c \
-	s_rint.c s_rintf.c s_round.c s_roundf.c \
+	s_rint.c s_rintf.c s_round.c s_roundf.c s_rsqrt.c s_rsqrtf.c \
 	s_scalbln.c s_scalbn.c s_scalbnf.c s_signbit.c \
 	s_signgam.c s_significand.c s_significandf.c s_sin.c \
 	s_sincos.c s_sincosf.c s_sinf.c \
@@ -135,11 +137,13 @@ COMMON_SRCS+=	b_tgammal.c catrigl.c \
 	s_asinhl.c s_atanl.c s_cbrtl.c s_ceill.c s_cexpl.c \
 	s_clogl.c s_cosl.c s_cospil.c s_cprojl.c \
 	s_csqrtl.c s_erfl.c s_exp2l.c s_expl.c s_floorl.c s_fmal.c \
-	s_fmaxl.c s_fmaximuml.c s_fmaximum_magl.c s_fmaximum_numl.c \
-	s_fminl.c s_fminimuml.c s_fminimum_magl.c s_fminimum_numl.c \
+	s_fmaxl.c s_fmaximuml.c s_fmaximum_magl.c \
+	s_fmaximum_numl.c s_fmaximum_mag_numl.c \
+	s_fminl.c s_fminimuml.c s_fminimum_magl.c \
+	s_fminimum_numl.c s_fminimum_mag_numl.c \
 	s_frexpl.c s_logbl.c s_logl.c s_nanl.c \
 	s_nextafterl.c s_nexttoward.c s_remquol.c s_rintl.c s_roundl.c \
-	s_scalbnl.c s_sinl.c s_sincosl.c s_sinpil.c \
+	s_scalbnl.c s_sinl.c s_sincosl.c s_sinpil.c s_rsqrtl.c \
 	s_tanhl.c s_tanl.c s_tanpil.c s_truncl.c w_cabsl.c
 # Work around this warning from gcc:
 #     lib/msun/ld80/e_powl.c:275:1: error: floating constant exceeds range of
@@ -182,7 +186,8 @@ MAN=	acos.3 acosh.3 asin.3 asinh.3 atan.3 atan2.3 atanh.3 \
 	exp.3 fabs.3 fdim.3 \
 	feclearexcept.3 feenableexcept.3 fegetenv.3 \
 	fegetround.3 fenv.3 floor.3 fma.3 \
-	fmax.3 fmaximum.3 fmaximum_mag.3 fmaximum_num.3 fmod.3 \
+	fmax.3 fmaximum.3 fmaximum_mag.3 \
+	fmaximum_mag_num.3 fmaximum_num.3 fmod.3 \
 	hypot.3 ieee.3 ieee_test.3 ilogb.3 j0.3 \
 	lgamma.3 log.3 lrint.3 lround.3 math.3 nan.3 \
 	nextafter.3 remainder.3 rint.3 \
@@ -242,6 +247,9 @@ MLINKS+=fmaximum.3 fmaximumf.3 fmaximum.3 fmaximuml.3 \
 MLINKS+=fmaximum_mag.3 fmaximum_magf.3 fmaximum_mag.3 fmaximum_magl.3 \
 	fmaximum_mag.3 fminimum_mag.3 fmaximum_mag.3 fminimum_magf.3 \
 	fmaximum_mag.3 fminimum_magl.3
+MLINKS+=fmaximum_mag_num.3 fmaximum_mag_numf.3 fmaximum_mag_num.3 fmaximum_mag_numl.3 \
+	fmaximum_mag_num.3 fminimum_mag_num.3 fmaximum_mag_num.3 fminimum_mag_numf.3 \
+	fmaximum_mag_num.3 fminimum_mag_numl.3
 MLINKS+=fmaximum_num.3 fmaximum_numf.3 fmaximum_num.3 fmaximum_numl.3 \
 	fmaximum_num.3 fminimum_num.3 fmaximum_num.3 fminimum_numf.3 \
 	fmaximum_num.3 fminimum_numl.3
@@ -277,11 +285,11 @@ MLINKS+=round.3 roundf.3 round.3 roundl.3
 MLINKS+=scalbn.3 scalbln.3 scalbn.3 scalblnf.3 scalbn.3 scalblnl.3
 MLINKS+=scalbn.3 scalbnf.3 scalbn.3 scalbnl.3
 MLINKS+=sin.3 sinf.3 sin.3 sinl.3
-MLINKS+=sincos.3 sincosf.3 sin.3 sincosl.3
+MLINKS+=sincos.3 sincosf.3 sincos.3 sincosl.3
 MLINKS+=sinh.3 sinhf.3 sinh.3 sinhl.3
 MLINKS+=sinpi.3 sinpif.3 sinpi.3 sinpil.3
 MLINKS+=sqrt.3 cbrt.3 sqrt.3 cbrtf.3 sqrt.3 cbrtl.3 sqrt.3 sqrtf.3 \
-	sqrt.3 sqrtl.3
+	sqrt.3 sqrtl.3 sqrt.3 rsqrt.3 sqrt.3 rsqrtf.3 sqrt.3 rsqrtl.3
 MLINKS+=tan.3 tanf.3 tan.3 tanl.3
 MLINKS+=tanh.3 tanhf.3 tanh.3 tanhl.3
 MLINKS+=tanpi.3 tanpif.3 tanpi.3 tanpil.3

@@ -204,6 +204,7 @@ typedef enum {
 	ZFS_PROP_DEFAULTGROUPOBJQUOTA,
 	ZFS_PROP_DEFAULTPROJECTOBJQUOTA,
 	ZFS_PROP_SNAPSHOTS_CHANGED_NSECS,
+	ZFS_PROP_ZONED_UID,
 	ZFS_NUM_PROPS
 } zfs_prop_t;
 
@@ -362,6 +363,7 @@ typedef enum {
 /* Small enough to not hog a whole line of printout in zpool(8). */
 #define	ZPROP_MAX_COMMENT	32
 #define	ZPROP_BOOLEAN_NA	2
+#define	ZPROP_BOOLEAN_INHERIT	2
 
 #define	ZPROP_VALUE		"value"
 #define	ZPROP_SOURCE		"source"
@@ -473,6 +475,10 @@ typedef enum {
 	VDEV_PROP_AUTOSIT,
 	VDEV_PROP_SLOW_IO_EVENTS,
 	VDEV_PROP_SCHEDULER,
+	VDEV_PROP_FDOMAIN,
+	VDEV_PROP_FGROUP,
+	VDEV_PROP_ALLOC_BIAS,
+	VDEV_PROP_ROTATIONAL,
 	VDEV_NUM_PROPS
 } vdev_prop_t;
 
@@ -487,6 +493,16 @@ typedef enum {
 	VDEV_SCHEDULER_ON,
 	VDEV_SCHEDULER_OFF
 } vdev_scheduler_type_t;
+
+/*
+ * Allocation bias for top-level vdevs (alloc_bias property).
+ */
+typedef enum vdev_alloc_bias {
+	VDEV_BIAS_NONE,
+	VDEV_BIAS_LOG,		/* dedicated to ZIL data (SLOG) */
+	VDEV_BIAS_SPECIAL,	/* dedicated to ddt, metadata, and small blks */
+	VDEV_BIAS_DEDUP		/* dedicated to dedup metadata */
+} vdev_alloc_bias_t;
 
 /*
  * Dataset property functions shared between libzfs and kernel.
@@ -916,6 +932,7 @@ typedef struct zpool_load_policy {
 #define	ZPOOL_CONFIG_VDEV_ENC_SYSFS_PATH	"vdev_enc_sysfs_path"
 
 #define	ZPOOL_CONFIG_WHOLE_DISK		"whole_disk"
+#define	ZPOOL_CONFIG_VDEV_ROTATIONAL	"rotational"
 #define	ZPOOL_CONFIG_ERRCOUNT		"error_count"
 #define	ZPOOL_CONFIG_NOT_PRESENT	"not_present"
 #define	ZPOOL_CONFIG_SPARES		"spares"
@@ -951,6 +968,9 @@ typedef struct zpool_load_policy {
 #define	ZPOOL_CONFIG_BOOTFS		"bootfs"	/* not stored on disk */
 #define	ZPOOL_CONFIG_MISSING_DEVICES	"missing_vdevs"	/* not stored on disk */
 #define	ZPOOL_CONFIG_LOAD_INFO		"load_info"	/* not stored on disk */
+#define	ZPOOL_CONFIG_CREATE_INFO	"create_info"	/* not stored on disk */
+#define	ZPOOL_CREATE_INFO_VDEV		"create_err_vdev"
+#define	ZPOOL_CREATE_INFO_POOL		"create_err_pool"
 #define	ZPOOL_CONFIG_REWIND_INFO	"rewind_info"	/* not stored on disk */
 #define	ZPOOL_CONFIG_UNSUP_FEAT		"unsup_feat"	/* not stored on disk */
 #define	ZPOOL_CONFIG_ENABLED_FEAT	"enabled_feat"	/* not stored on disk */
@@ -1007,6 +1027,7 @@ typedef struct zpool_load_policy {
 #define	ZPOOL_CONFIG_DRAID_NDATA	"draid_ndata"
 #define	ZPOOL_CONFIG_DRAID_NSPARES	"draid_nspares"
 #define	ZPOOL_CONFIG_DRAID_NGROUPS	"draid_ngroups"
+#define	ZPOOL_CONFIG_DRAID_NCHILDREN	"draid_nchildren"
 
 #define	VDEV_TYPE_ROOT			"root"
 #define	VDEV_TYPE_MIRROR		"mirror"
@@ -1782,6 +1803,7 @@ typedef enum {
 	ZFS_ERR_ASHIFT_MISMATCH,
 	ZFS_ERR_STREAM_LARGE_MICROZAP,
 	ZFS_ERR_TOO_MANY_SITOUTS,
+	ZFS_ERR_NO_USER_NS_SUPPORT,
 } zfs_errno_t;
 
 /*

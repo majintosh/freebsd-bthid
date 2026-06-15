@@ -14,7 +14,7 @@ MT76_USB=		0
 # General options for common code so drivers can check.
 MT76_ACPI?=		0
 MT76_CONFIG_PM?=	0
-MT76_DEBUGFS?=		0
+MT76_DEBUGFS?=		1
 MT76_SOC_WED?=		0
 
 # Other
@@ -45,5 +45,5 @@ CFLAGS+=	${LINUXKPI_INCLUDES}
 #CFLAGS+=	-ferror-limit=0
 
 CFLAGS+=        -DKBUILD_MODNAME='"${MT76_DRIVER_NAME}"'
-CFLAGS+=	-DLINUXKPI_VERSION=61900
+CFLAGS+=	-DLINUXKPI_VERSION=70000
 

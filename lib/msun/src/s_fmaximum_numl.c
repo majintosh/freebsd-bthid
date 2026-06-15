@@ -43,16 +43,22 @@ fmaximum_numl(long double x, long double y)
 	u[1].e = y;
 	mask_nbit_l(u[1]);
 
-	nan_x = u[0].bits.exp == 32767 && (u[0].bits.manh | u[0].bits.manl) != 0;
-	nan_y = u[1].bits.exp == 32767 && (u[1].bits.manh | u[1].bits.manl) != 0;
+	nan_x = isnan(x);
+	nan_y = isnan(y);
 
 	if (nan_x || nan_y) {
-		/* These ternary conditionals force (x+y), so that sNaN's raise exceptions */
+		/* If both are NaN, adding returns qNaN */
 		if (nan_x && nan_y)
-			return (x + y);
+		    return (x + y);
+
+		/* force_except makes sure sNaN's raise exceptions */
+		volatile long double force_except = x + y;
+		force_except;
+
 		if (nan_x)
-			return ((x + y) != 0.0 ? y : y);
-		return ((x + y) != 0.0 ? x : x);
+			return (y);
+		else
+			return (x);
 	}
 
 	/* Handle comparisons of signed zeroes. */

@@ -266,16 +266,6 @@ fuse_extattr_check_cred(struct vnode *vp, int ns, struct ucred *cred,
 	}
 }
 
-/* Get a filehandle for a directory */
-static int
-fuse_filehandle_get_dir(struct vnode *vp, struct fuse_filehandle **fufhp,
-	struct ucred *cred, pid_t pid)
-{
-	if (fuse_filehandle_get(vp, FREAD, fufhp, cred, pid) == 0)
-		return 0;
-	return fuse_filehandle_get(vp, FEXEC, fufhp, cred, pid);
-}
-
 /* Send FUSE_FLUSH for this vnode */
 static int
 fuse_flush(struct vnode *vp, struct ucred *cred, pid_t pid, int fflag)
@@ -327,7 +317,8 @@ fuse_fifo_close(struct vop_close_args *ap)
 
 /* Invalidate a range of cached data, whether dirty of not */
 static int
-fuse_inval_buf_range(struct vnode *vp, off_t filesize, off_t start, off_t end)
+fuse_inval_buf_range(struct vnode *vp, off_t filesize, off_t start, off_t end,
+	int slpflag)
 {
 	struct buf *bp;
 	daddr_t left_lbn, end_lbn, right_lbn;
@@ -339,7 +330,9 @@ fuse_inval_buf_range(struct vnode *vp, off_t filesize, off_t start, off_t end)
 	end_lbn = howmany(end, iosize);
 	left_on = start & (iosize - 1);
 	if (left_on != 0) {
-		bp = getblk(vp, left_lbn, iosize, PCATCH, 0, 0);
+		bp = getblk(vp, left_lbn, iosize, slpflag, 0, 0);
+		if (!bp)
+			return (EINTR);
 		if ((bp->b_flags & B_CACHE) != 0 && bp->b_dirtyend >= left_on) {
 			/*
 			 * Flush the dirty buffer, because we don't have a
@@ -358,7 +351,9 @@ fuse_inval_buf_range(struct vnode *vp, off_t filesize, off_t start, off_t end)
 		right_lbn = end / iosize;
 		new_filesize = MAX(filesize, end);
 		right_blksize = MIN(iosize, new_filesize - iosize * right_lbn);
-		bp = getblk(vp, right_lbn, right_blksize, PCATCH, 0, 0);
+		bp = getblk(vp, right_lbn, right_blksize, slpflag, 0, 0);
+		if (!bp)
+			return (EINTR);
 		if ((bp->b_flags & B_CACHE) != 0 && bp->b_dirtyoff < right_on) {
 			/*
 			 * Flush the dirty buffer, because we don't have a
@@ -726,7 +721,10 @@ fuse_vnop_allocate(struct vop_allocate_args *ap)
 	err = fuse_vnode_size(vp, &filesize, cred, curthread);
 	if (err)
 		return (err);
-	fuse_inval_buf_range(vp, filesize, *offset, *offset + *len);
+	err = fuse_inval_buf_range(vp, filesize, *offset, *offset + *len,
+	    PCATCH);
+	if (err)
+		return (err);
 
 	fdisp_init(&fdi, sizeof(*ffi));
 	fdisp_make_vp(&fdi, FUSE_FALLOCATE, vp, curthread, cred);
@@ -1020,7 +1018,7 @@ fuse_vnop_copy_file_range(struct vop_copy_file_range_args *ap)
 
 	vnode_pager_clean_sync(invp);
 	err = fuse_inval_buf_range(outvp, outfilesize, *ap->a_outoffp,
-		*ap->a_outoffp + io.uio_resid);
+		*ap->a_outoffp + io.uio_resid, PCATCH);
 	if (err)
 		goto unlock;
 
@@ -1745,14 +1743,16 @@ fuse_vnop_lookup(struct vop_lookup_args *ap)
 				 * Need to figure out the vnode locking to make
 				 * this work.
 				 */
-				fuse_internal_getattr(dvp, &dvattr, cred, td);
-				if ((dvattr.va_mode & S_ISTXT) &&
+				err = fuse_internal_getattr(dvp, &dvattr, cred,
+						td);
+				if (err == 0 &&
+					(dvattr.va_mode & S_ISTXT) &&
 					fuse_internal_access(dvp, VADMIN, td,
 						cred) &&
 					fuse_internal_access(*vpp, VADMIN, td,
-						cred)) {
+						cred))
+				{
 					err = EPERM;
-					goto out;
 				}
 			}
 		}
@@ -2055,7 +2055,7 @@ fuse_vnop_readdir(struct vop_readdir_args *ap)
 		return (EXTERROR(EINVAL, "Buffer is too small"));
 
 	tresid = uio->uio_resid;
-	err = fuse_filehandle_get_dir(vp, &fufh, cred, pid);
+	err = fuse_filehandle_get(vp, FREAD, &fufh, cred, pid);
 	if (err == EBADF && mp->mnt_flag & MNT_EXPORTED) {
 		KASSERT(!fsess_is_impl(mp, FUSE_OPENDIR),
 			("FUSE file systems that implement "
@@ -2672,7 +2672,7 @@ fuse_vnop_write(struct vop_write_args *ap)
 		end = start + uio->uio_resid;
 		if (!pages) {
 			err = fuse_inval_buf_range(vp, filesize, start,
-			    end);
+			    end, PCATCH);
 			if (err)
 				goto out;
 		}
@@ -2970,8 +2970,8 @@ out:
  * bsd_list, bsd_list_len - output list compatible with bsd vfs
  */
 static int
-fuse_xattrlist_convert(char *prefix, const char *list, int list_len,
-    char *bsd_list, int *bsd_list_len)
+fuse_xattrlist_convert(struct fuse_data *data, char *prefix, const char *list,
+    int list_len, char *bsd_list, int *bsd_list_len)
 {
 	int len, pos, dist_to_next, prefix_len;
 
@@ -2980,7 +2980,14 @@ fuse_xattrlist_convert(char *prefix, const char *list, int list_len,
 	prefix_len = strlen(prefix);
 
 	while (pos < list_len && list[pos] != '\0') {
-		dist_to_next = strlen(&list[pos]) + 1;
+		dist_to_next = strnlen(&list[pos], list_len - pos - 1) + 1;
+		if (list[pos + dist_to_next - 1] != '\0') {
+			fuse_warn(data, FSESS_WARN_LSEXTATTR_NUL,
+				"The FUSE server returned a non nul-terminated "
+				"LISTXATTR response.");
+			return (EXTERROR(EIO,
+				"The FUSE server returned a malformed list"));
+		}
 		if (bcmp(&list[pos], prefix, prefix_len) == 0 &&
 		    list[pos + prefix_len] == extattr_namespace_separator) {
 			len = dist_to_next -
@@ -3036,6 +3043,7 @@ fuse_vnop_listextattr(struct vop_listextattr_args *ap)
 	struct fuse_listxattr_in *list_xattr_in;
 	struct fuse_listxattr_out *list_xattr_out;
 	struct mount *mp = vnode_mount(vp);
+	struct fuse_data *data = fuse_get_mpdata(mp);
 	struct thread *td = ap->a_td;
 	struct ucred *cred = ap->a_cred;
 	char *prefix;
@@ -3116,8 +3124,6 @@ fuse_vnop_listextattr(struct vop_listextattr_args *ap)
 	linux_list = fdi.answ;
 	/* FUSE doesn't allow the server to return more data than requested */
 	if (fdi.iosize > linux_list_len) {
-		struct fuse_data *data = fuse_get_mpdata(mp);
-
 		fuse_warn(data, FSESS_WARN_LSEXTATTR_LONG,
 			"server returned "
 			"more extended attribute data than requested; "
@@ -3134,7 +3140,7 @@ fuse_vnop_listextattr(struct vop_listextattr_args *ap)
 	 * FreeBSD's format before giving it to the user.
 	 */
 	bsd_list = malloc(linux_list_len, M_TEMP, M_WAITOK);
-	err = fuse_xattrlist_convert(prefix, linux_list, linux_list_len,
+	err = fuse_xattrlist_convert(data, prefix, linux_list, linux_list_len,
 	    bsd_list, &bsd_list_len);
 	if (err != 0)
 		goto out;
@@ -3206,7 +3212,9 @@ fuse_vnop_deallocate(struct vop_deallocate_args *ap)
 	err = fuse_vnode_size(vp, &filesize, cred, curthread);
 	if (err)
 		goto out;
-	fuse_inval_buf_range(vp, filesize, *offset, *offset + *len);
+	err = fuse_inval_buf_range(vp, filesize, *offset, *offset + *len, 0);
+	if (err)
+		goto out;
 
 	fdisp_init(&fdi, sizeof(*ffi));
 	fdisp_make_vp(&fdi, FUSE_FALLOCATE, vp, curthread, cred);

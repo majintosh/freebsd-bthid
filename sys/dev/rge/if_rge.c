@@ -113,6 +113,7 @@ struct rge_matchid {
 
 const struct rge_matchid rge_devices[] = {
 	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_E3000, "Killer E3000" },
+	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_E5000, "Killer E5000" },
 	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTL8125, "RTL8125" },
 	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTL8126, "RTL8126", },
 	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTL8127, "RTL8127" },
@@ -445,23 +446,19 @@ rge_attach(device_t dev)
 
 	rge_config_imtype(sc, RGE_IMTYPE_SIM);
 
-	/* TODO: disable ASPM/ECPM? */
-
-#if 0
-	/*
-	 * PCI Express check.
-	 */
-	if (pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_PCIEXPRESS,
-	    &offset, NULL)) {
-		/* Disable PCIe ASPM and ECPM. */
-		reg = pci_conf_read(pa->pa_pc, pa->pa_tag,
-		    offset + PCI_PCIE_LCSR);
-		reg &= ~(PCI_PCIE_LCSR_ASPM_L0S | PCI_PCIE_LCSR_ASPM_L1 |
-		    PCI_PCIE_LCSR_ECPM);
-		pci_conf_write(pa->pa_pc, pa->pa_tag, offset + PCI_PCIE_LCSR,
-		    reg);
+	/* Disable PCIe ASPM and ECPM if requested. */
+	if (sc->sc_disable_aspm) {
+		int ecap;
+		if (pci_find_cap(dev, PCIY_EXPRESS, &ecap) == 0) {
+			uint16_t lctl;
+			lctl = pci_read_config(dev,
+			    ecap + PCIER_LINK_CTL, 2);
+			lctl &= ~(PCIEM_LINK_CTL_ASPMC |
+			    PCIEM_LINK_CTL_ECPM);
+			pci_write_config(dev,
+			    ecap + PCIER_LINK_CTL, lctl, 2);
+		}
 	}
-#endif
 
 	RGE_LOCK(sc);
 	if (rge_chipinit(sc)) {

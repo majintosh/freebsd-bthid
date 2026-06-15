@@ -4,7 +4,7 @@ DEVIWLWIFIDIR=	${SRCTOP}/sys/contrib/dev/iwlwifi
 
 .PATH: ${DEVIWLWIFIDIR}
 
-IWLWIFI_CONFIG_PM=	0
+IWLWIFI_CONFIG_PM=	1
 IWLWIFI_DEBUGFS=	0
 .if ${KERN_OPTS:MDEV_ACPI}
 IWLWIFI_CONFIG_ACPI=	1
@@ -44,7 +44,7 @@ SRCS+=	mld/agg.c mld/ap.c mld/coex.c
 SRCS+=	mld/ftm-initiator.c mld/fw.c mld/iface.c mld/key.c
 #SRCS+=	mld/led.c
 SRCS+=	mld/link.c mld/low_latency.c mld/mac80211.c mld/mcc.c mld/mld.c
-SRCS+=	mld/mlo.c mld/notif.c mld/phy.c mld/power.c mld/ptp.c
+SRCS+=	mld/mlo.c mld/nan.c mld/notif.c mld/phy.c mld/power.c mld/ptp.c
 SRCS+=	mld/regulatory.c mld/roc.c mld/rx.c mld/scan.c
 SRCS+=	mld/session-protect.c mld/sta.c mld/stats.c mld/thermal.c
 SRCS+=	mld/time_sync.c mld/tlc.c mld/tx.c
@@ -59,6 +59,7 @@ CFLAGS+=	-DCONFIG_MAC80211_DEBUGFS
 .if defined(IWLWIFI_CONFIG_PM) && ${IWLWIFI_CONFIG_PM} > 0
 SRCS+=	mvm/d3.c
 SRCS+=	mld/d3.c
+SRCS+=	lkpi_iwlwifi_pm.c
 CFLAGS+=	-DCONFIG_PM
 CFLAGS+=	-DCONFIG_PM_SLEEP
 .endif
@@ -94,7 +95,7 @@ CFLAGS+=	-DCONFIG_IWLWIFI_DEVICE_TRACING=1
 #CFLAGS+=	-DCONFIG_EFI=1
 
 CFLAGS+=	-DKBUILD_MODNAME='"iwlwifi"'
-CFLAGS+=	-DLINUXKPI_VERSION=61900
+CFLAGS+=	-DLINUXKPI_VERSION=70000
 
 CWARNFLAGS.clang.drv.c+=	-Wno-initializer-overrides
 CWARNFLAGS.drv.c+=		-Wno-override-init ${CWARNFLAGS.${COMPILER_TYPE}.${.IMPSRC:T}}

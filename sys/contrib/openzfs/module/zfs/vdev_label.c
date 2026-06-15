@@ -467,6 +467,11 @@ vdev_config_generate(spa_t *spa, vdev_t *vd, boolean_t getstats,
 	if (!(flags & (VDEV_CONFIG_SPARE | VDEV_CONFIG_L2CACHE)))
 		fnvlist_add_uint64(nv, ZPOOL_CONFIG_ID, vd->vdev_id);
 	fnvlist_add_uint64(nv, ZPOOL_CONFIG_GUID, vd->vdev_guid);
+	if (!(flags & (VDEV_CONFIG_SPARE | VDEV_CONFIG_L2CACHE)) &&
+	    vd->vdev_top != NULL) {
+		fnvlist_add_uint64(nv, ZPOOL_CONFIG_TOP_GUID,
+		    vd->vdev_top->vdev_guid);
+	}
 
 	if (vd->vdev_path != NULL)
 		fnvlist_add_string(nv, ZPOOL_CONFIG_PATH, vd->vdev_path);
@@ -493,6 +498,11 @@ vdev_config_generate(spa_t *spa, vdev_t *vd, boolean_t getstats,
 		    vd->vdev_wholedisk);
 	}
 
+	if (vd->vdev_ops->vdev_op_leaf) {
+		fnvlist_add_uint64(nv, ZPOOL_CONFIG_VDEV_ROTATIONAL,
+		    !vd->vdev_nonrot);
+	}
+
 	if (vd->vdev_not_present && !(flags & VDEV_CONFIG_MISSING))
 		fnvlist_add_uint64(nv, ZPOOL_CONFIG_NOT_PRESENT, 1);
 
@@ -501,6 +511,9 @@ vdev_config_generate(spa_t *spa, vdev_t *vd, boolean_t getstats,
 
 	if (flags & VDEV_CONFIG_L2CACHE)
 		fnvlist_add_uint64(nv, ZPOOL_CONFIG_ASHIFT, vd->vdev_ashift);
+
+	if ((flags & VDEV_CONFIG_SPARE) && vd->vdev_asize != 0)
+		fnvlist_add_uint64(nv, ZPOOL_CONFIG_ASIZE, vd->vdev_asize);
 
 	if (!(flags & (VDEV_CONFIG_SPARE | VDEV_CONFIG_L2CACHE)) &&
 	    vd == vd->vdev_top) {
@@ -1109,8 +1122,29 @@ vdev_label_init(vdev_t *vd, uint64_t crtxg, vdev_labeltype_t reason)
 	 * Determine if the vdev is in use.
 	 */
 	if (reason != VDEV_LABEL_REMOVE && reason != VDEV_LABEL_SPLIT &&
-	    vdev_inuse(vd, crtxg, reason, &spare_guid, &l2cache_guid))
+	    vdev_inuse(vd, crtxg, reason, &spare_guid, &l2cache_guid)) {
+		if (spa->spa_create_info == NULL) {
+			nvlist_t *nv = fnvlist_alloc();
+			nvlist_t *cfg;
+
+			if (vd->vdev_path != NULL)
+				fnvlist_add_string(nv,
+				    ZPOOL_CREATE_INFO_VDEV, vd->vdev_path);
+
+			cfg = vdev_label_read_config(vd, -1ULL);
+			if (cfg != NULL) {
+				const char *pname;
+				if (nvlist_lookup_string(cfg,
+				    ZPOOL_CONFIG_POOL_NAME, &pname) == 0)
+					fnvlist_add_string(nv,
+					    ZPOOL_CREATE_INFO_POOL, pname);
+				nvlist_free(cfg);
+			}
+
+			spa->spa_create_info = nv;
+		}
 		return (SET_ERROR(EBUSY));
+	}
 
 	/*
 	 * If this is a request to add or replace a spare or l2cache device
@@ -1371,6 +1405,7 @@ vdev_label_read_bootenv(vdev_t *rvd, nvlist_t *bootenv)
 				    VB_NVLIST);
 				break;
 			}
+			vbe->vbe_bootenv[sizeof (vbe->vbe_bootenv) - 1] = '\0';
 			fnvlist_add_string(bootenv, FREEBSD_BOOTONCE, buf);
 		}
 

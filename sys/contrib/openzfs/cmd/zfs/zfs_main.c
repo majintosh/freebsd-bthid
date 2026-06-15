@@ -32,6 +32,7 @@
  * Copyright (c) 2019, loli10K <ezomori.nozomu@gmail.com>
  * Copyright 2019 Joyent, Inc.
  * Copyright (c) 2019, 2020 by Christian Schwarz. All rights reserved.
+ * Copyright 2026 Oxide Computer Company
  */
 
 #include <assert.h>
@@ -6866,7 +6867,7 @@ holds_callback(zfs_handle_t *zhp, void *data)
 
 	if (cbp->cb_recursive) {
 		const char *snapname;
-		char *delim  = strchr(zname, '@');
+		const char *delim  = strchr(zname, '@');
 		if (delim == NULL)
 			return (0);
 
@@ -8739,12 +8740,6 @@ zfs_do_change_key(int argc, char **argv)
 		}
 	}
 
-	if (inheritkey && !nvlist_empty(props)) {
-		(void) fprintf(stderr,
-		    gettext("Properties not allowed for inheriting\n"));
-		usage(B_FALSE);
-	}
-
 	argc -= optind;
 	argv += optind;
 
@@ -9404,6 +9399,18 @@ main(int argc, char **argv)
 		return (1);
 	}
 
+	/*
+	 * Special case '<subcommand> --help|-?'
+	 */
+	if (argc >= 3 && (strcmp(argv[2], "--help") == 0 ||
+	    strcmp(argv[2], "-?") == 0)) {
+		int idx;
+		if (find_command_idx(cmdname, &idx) == 0) {
+			current_command = &command_table[idx];
+			usage(B_FALSE);
+		}
+	}
+
 	zfs_save_arguments(argc, argv, history_str, sizeof (history_str));
 
 	libzfs_print_on_error(g_zfs, B_TRUE);
@@ -9422,6 +9429,7 @@ main(int argc, char **argv)
 	/*
 	 * Run the appropriate command.
 	 */
+	libzfs_mnttab_cache(g_zfs, B_TRUE);
 	if (find_command_idx(cmdname, &i) == 0) {
 		current_command = &command_table[i];
 		ret = command_table[i].func(argc - 1, newargv + 1);

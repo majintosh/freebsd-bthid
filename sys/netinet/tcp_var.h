@@ -493,7 +493,7 @@ struct tcpcb {
 	uint32_t tcp_hybrid_start;	/* Num of times we started hybrid pacing */
 	uint32_t tcp_hybrid_stop;	/* Num of times we stopped hybrid pacing */
 	uint32_t tcp_hybrid_error;	/* Num of times we failed to start hybrid pacing */
-	struct tcp_sendfile_track t_tcpreq_info[MAX_TCP_TRK_REQ];
+	struct tcp_sendfile_track *t_tcpreq_info;
 #endif
 #ifdef TCP_ACCOUNTING
 	uint64_t tcp_cnt_counters[TCP_NUM_CNT_COUNTERS];
@@ -789,7 +789,7 @@ tcp_packets_this_ack(struct tcpcb *tp, tcp_seq ack)
 #define	TF_TSO		0x01000000	/* TSO enabled on this connection */
 #define	TF_TOE		0x02000000	/* this connection is offloaded */
 #define	TF_CLOSED	0x04000000	/* close(2) called on socket */
-#define	TF_UNUSED	0x08000000	/* was TF_SENTSYN */
+#define	TF_DISCONNECTED	0x08000000	/* went through tcp_close() */
 #define	TF_LRD		0x10000000	/* Lost Retransmission Detection */
 #define	TF_CONGRECOVERY	0x20000000	/* congestion recovery mode */
 #define	TF_WASCRECOVERY	0x40000000	/* was in congestion recovery */
@@ -1308,6 +1308,7 @@ VNET_DECLARE(int, tcp_tolerate_missing_ts);
 VNET_DECLARE(int, tcp_do_rfc3042);
 VNET_DECLARE(int, tcp_do_rfc3390);
 VNET_DECLARE(int, tcp_do_rfc3465);
+VNET_DECLARE(int, tcp_do_rfc6191);
 VNET_DECLARE(int, tcp_do_sack);
 VNET_DECLARE(int, tcp_do_tso);
 VNET_DECLARE(int, tcp_ecn_maxretries);
@@ -1358,6 +1359,7 @@ VNET_DECLARE(struct inpcbinfo, tcbinfo);
 #define	V_tcp_do_rfc3042		VNET(tcp_do_rfc3042)
 #define	V_tcp_do_rfc3390		VNET(tcp_do_rfc3390)
 #define	V_tcp_do_rfc3465		VNET(tcp_do_rfc3465)
+#define	V_tcp_do_rfc6191		VNET(tcp_do_rfc6191)
 #define	V_tcp_do_sack			VNET(tcp_do_sack)
 #define	V_tcp_do_tso			VNET(tcp_do_tso)
 #define	V_tcp_ecn_maxretries		VNET(tcp_ecn_maxretries)
@@ -1396,7 +1398,6 @@ struct tcpcb *
 void	 tcp_discardcb(struct tcpcb *);
 void	 tcp_twstart(struct tcpcb *);
 int	 tcp_ctloutput(struct socket *, struct sockopt *);
-void	 tcp_fini(void *);
 char	*tcp_log_addrs(struct in_conninfo *, struct tcphdr *, const void *,
 	    const void *);
 char	*tcp_log_vain(struct in_conninfo *, struct tcphdr *, const void *,

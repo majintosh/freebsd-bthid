@@ -189,6 +189,12 @@ sg_mark_end(struct scatterlist *sg)
 }
 
 static inline void
+sg_init_marker(struct scatterlist *sg, uint32_t num_sgs)
+{
+	sg_mark_end(&sg[num_sgs - 1]);
+}
+
+static inline void
 sg_init_table(struct scatterlist *sg, unsigned int nents)
 {
 	bzero(sg, sizeof(*sg) * nents);
@@ -654,9 +660,9 @@ sg_pcopy_to_buffer(struct scatterlist *sgl, unsigned int nents,
 			sf = sf_buf_alloc(page, SFB_CPUPRIVATE | SFB_NOWAIT);
 			if (sf == NULL)
 				break;
-			vaddr = (char *)sf_buf_kva(sf);
+			vaddr = sf_buf_kva(sf);
 		} else
-			vaddr = (char *)PHYS_TO_DMAP(page_to_phys(page));
+			vaddr = PHYS_TO_DMAP(page_to_phys(page));
 		memcpy(buf, vaddr + sg->offset + offset, len);
 		if (!PMAP_HAS_DMAP)
 			sf_buf_free(sf);

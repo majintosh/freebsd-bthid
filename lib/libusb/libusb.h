@@ -119,6 +119,13 @@ enum libusb_endpoint_direction {
 
 #define	LIBUSB_TRANSFER_TYPE_MASK	0x03
 
+enum libusb_endpoint_transfer_type {
+	LIBUSB_ENDPOINT_TRANSFER_TYPE_CONTROL = 0,
+	LIBUSB_ENDPOINT_TRANSFER_TYPE_ISOCHRONOUS = 1,
+	LIBUSB_ENDPOINT_TRANSFER_TYPE_BULK = 2,
+	LIBUSB_ENDPOINT_TRANSFER_TYPE_INTERRUPT = 3,
+};
+
 enum libusb_transfer_type {
 	LIBUSB_TRANSFER_TYPE_CONTROL = 0,
 	LIBUSB_TRANSFER_TYPE_ISOCHRONOUS = 1,
@@ -202,8 +209,8 @@ enum libusb_capability {
 	LIBUSB_CAP_HAS_HID_ACCESS,
 
 	/*
-	 * Supports detaching of the default USB driver with
-	 * libusb_detach_kernel_driver().
+	 * Supports detaching and attaching of the default USB driver with
+	 * libusb_detach_kernel_driver() and libusb_attach_kernel_driver().
 	 */
 	LIBUSB_CAP_SUPPORTS_DETACH_KERNEL_DRIVER,
 };
