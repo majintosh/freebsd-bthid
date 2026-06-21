@@ -1,4 +1,4 @@
-.PATH: ${SRCTOP}sys/dev/hid/bthid
+.PATH: ${SRCTOP}/sys/dev/hid/bthid
 
 KMOD=	bthid
 SRCS=	bthid.c
