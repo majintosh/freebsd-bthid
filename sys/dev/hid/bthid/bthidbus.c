@@ -127,12 +127,6 @@ bthidbus_probe(device_t dev)
 	return (0);
 }
 
-static int
-bthidbus_attach(device_t dev)
-{
-	printf("BTHIDBUS ATTACHED\n");
-	return (0);
-}
 
 static int
 bthidbus_detach(device_t dev)
@@ -160,7 +154,7 @@ static void
 new_connection(device_t bus, struct socket *ctrl, struct socket *intr)
 {
 	device_t child;
-	child = device_add_child(bus, "bthid", DEVICE_UNIT_ANY);
+	child = BUS_ADD_CHILD(bus, 0, "bthid", DEVICE_UNIT_ANY);
 
 	if (child == NULL)
 		return;
@@ -170,13 +164,19 @@ new_connection(device_t bus, struct socket *ctrl, struct socket *intr)
 	bus_attach_children(bus);
 }
 
+static int
+bthidbus_attach(device_t dev)
+{
+	new_connection(bthidbus, bthid_ctrl, bthid_intr);
+	return (0);
+}
+
 static void
 bthidbus_identify(driver_t *driver, device_t parent)
 {
 	printf("BTHIDBUS IDENTIFIED\n");
 	if (bthidbus == NULL) {
 		bthidbus = BUS_ADD_CHILD(parent, 0, "bthidbus", DEVICE_UNIT_ANY);
-		new_connection(bthidbus, bthid_ctrl, bthid_intr);
 	}
 }
 static device_method_t bthidbus_methods[] = {
