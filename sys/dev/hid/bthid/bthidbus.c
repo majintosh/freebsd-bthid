@@ -120,14 +120,6 @@ socket_close(struct socket *sock)
 
 static device_t bthidbus = NULL;
 
-static void
-bthidbus_identify(driver_t *driver, device_t parent)
-{
-	printf("BTHIDBUS IDENTIFIED\n");
-	if (bthidbus == NULL)
-		bthidbus = BUS_ADD_CHILD(parent, 0, "bthidbus", DEVICE_UNIT_ANY);
-}
-
 static int
 bthidbus_probe(device_t dev)
 {
@@ -178,6 +170,15 @@ new_connection(device_t bus, struct socket *ctrl, struct socket *intr)
 	bus_attach_children(bus);
 }
 
+static void
+bthidbus_identify(driver_t *driver, device_t parent)
+{
+	printf("BTHIDBUS IDENTIFIED\n");
+	if (bthidbus == NULL) {
+		bthidbus = BUS_ADD_CHILD(parent, 0, "bthidbus", DEVICE_UNIT_ANY);
+		new_connection(bthidbus, bthid_ctrl, bthid_intr);
+	}
+}
 static device_method_t bthidbus_methods[] = {
 	DEVMETHOD(device_identify,	bthidbus_identify),
 	DEVMETHOD(device_probe,		bthidbus_probe),
@@ -197,7 +198,6 @@ bthidbus_modevent(module_t mod, int type, void *data)
 		case MOD_LOAD:
 			socket_setup(&bthid_ctrl, 0x11);
 			socket_setup(&bthid_intr, 0x13);
-			new_connection(bthidbus, bthid_ctrl, bthid_intr);
 			TASK_INIT(&printer_task, 0, printer, bthid_intr); // Worried this might run after our bthid_intr socket already receives a packet
 			break;
 		case MOD_UNLOAD:
