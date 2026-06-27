@@ -3,6 +3,13 @@
 #include <sys/module.h>
 #include <sys/kernel.h>
 
+#include "bthid.h"
+
+struct bthid_softc {
+	struct socket *ctrl;
+	struct socket *intr;
+};
+
 static int
 bthid_probe(device_t dev)
 {
@@ -32,7 +39,7 @@ static device_method_t bthid_methods[] = {
 static driver_t bthid_driver = {
 	"bthid",
 	bthid_methods,
-	0
+	sizeof(struct bthid_softc)
 };
 
 DRIVER_MODULE(bthid, bthidbus, bthid_driver, NULL, NULL);
