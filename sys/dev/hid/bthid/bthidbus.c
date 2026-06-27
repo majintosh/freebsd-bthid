@@ -132,6 +132,7 @@ static int
 bthidbus_detach(device_t dev)
 {
 	printf("BTHIDBUS DETACHED\n");
+	bus_detach_children(dev);
 	return (0);
 }
 
