@@ -19,7 +19,11 @@ bthid_probe(device_t dev)
 static int
 bthid_attach(device_t dev)
 {
-	return 0; // This is where we store the ivars in the softc
+	struct bthid_softc *sc = device_get_softc(dev);
+	struct bthid_ivars *ivar = device_get_ivars(dev);
+	sc->ctrl = ivar->ctrl;
+	sc->intr = ivar->intr;
+	return 0;
 }
 
 static int
