@@ -2,6 +2,8 @@
 #include <sys/bus.h>
 #include <sys/module.h>
 #include <sys/kernel.h>
+#include <sys/socketvar.h>
+#include <sys/mutex.h>
 
 #include "bthid.h"
 
@@ -27,10 +29,26 @@ bthid_attach(device_t dev)
 }
 
 static int
-bthid_detach(device_t dev)
+socket_close(struct socket* sock)
 {
+	if (sock == NULL)
+		return 0;
+	SOCK_RECVBUF_LOCK(sock);
+	soupcall_clear(sock, SO_RCV);
+	SOCK_RECVBUF_UNLOCK(sock);
+	soclose(sock);
 	return 0;
 }
+
+static int
+bthid_detach(device_t dev)
+{
+	struct bthid_softc *sc = device_get_softc(dev);
+	socket_close(sc->ctrl);
+	socket_close(sc->intr);
+	return 0;
+}
+
 
 static device_method_t bthid_methods[] = {
 	DEVMETHOD(device_probe,		bthid_probe),
