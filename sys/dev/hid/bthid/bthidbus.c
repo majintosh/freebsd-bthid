@@ -18,6 +18,8 @@
 #include <netgraph/bluetooth/include/ng_l2cap.h>
 #include <netgraph/bluetooth/include/ng_btsocket.h>
 
+#include "bthid.h"
+
 static struct socket *bthid_ctrl, *bthid_intr;
 static struct task printer_task;
 
@@ -147,11 +149,43 @@ bthidbus_detach(device_t dev)
 	return (0);
 }
 
+static device_t
+bthidbus_add_child(device_t dev, u_int order, const char *name, int unit)
+{
+	struct bthid_ivars *ivars;
+	device_t child;
+	child = device_add_child_ordered(dev, order, name, unit);
+
+	if (child == NULL)
+		return child;
+	ivars = malloc(sizeof(struct bthid_ivars), M_DEVBUF, M_WAITOK | M_ZERO);
+	device_set_ivars(child, ivars);
+
+	return (child);
+}
+
+static void
+new_connection(device_t bus, struct socket *ctrl, struct socket *intr)
+{
+	device_t child;
+	child = device_add_child(bus, "bthid", DEVICE_UNIT_ANY);
+
+	if (child == NULL)
+		return;
+	struct bthid_ivars *ivars = device_get_ivars(child);
+	ivars->ctrl = ctrl;
+	ivars->intr = intr;
+	bus_attach_children(bus);
+}
+
 static device_method_t bthidbus_methods[] = {
 	DEVMETHOD(device_identify,	bthidbus_identify),
 	DEVMETHOD(device_probe,		bthidbus_probe),
 	DEVMETHOD(device_attach,	bthidbus_attach),
 	DEVMETHOD(device_detach,	bthidbus_detach),
+
+	/* BUS METHODS */
+	DEVMETHOD(bus_add_child,	bthidbus_add_child),
 	DEVMETHOD_END
 };
 
@@ -163,6 +197,7 @@ bthidbus_modevent(module_t mod, int type, void *data)
 		case MOD_LOAD:
 			socket_setup(&bthid_ctrl, 0x11);
 			socket_setup(&bthid_intr, 0x13);
+			new_connection(bthidbus, bthid_ctrl, bthid_intr);
 			TASK_INIT(&printer_task, 0, printer, bthid_intr); // Worried this might run after our bthid_intr socket already receives a packet
 			break;
 		case MOD_UNLOAD:
@@ -186,3 +221,4 @@ static driver_t bthidbus_driver = {
 };
 
 DRIVER_MODULE(bthidbus, nexus, bthidbus_driver, bthidbus_modevent, NULL);
+MODULE_VERSION(bthidbus, 1);
