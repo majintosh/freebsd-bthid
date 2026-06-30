@@ -47,6 +47,7 @@ socket_close(struct socket* sock)
 	if (sock->so_rcv.sb_upcall != NULL)
 		soupcall_clear(sock, SO_RCV);
 	SOCK_RECVBUF_UNLOCK(sock);
+	// Need to clear taskqueue threads before closing socket
 	soclose(sock);
 	return 0;
 }
@@ -115,6 +116,18 @@ bthid_intr_start(device_t dev, device_t child __unused)
 	return (0);
 }
 
+static int
+bthid_intr_stop(device_t dev, device_t child __unused)
+{
+	struct bthid_softc *sc = device_get_softc(dev);
+	SOCK_RECVBUF_LOCK(sc->intr);
+	if (sc->intr->so_rcv.sb_upcall != NULL)
+		soupcall_clear(sc->intr, SO_RCV);
+	SOCK_RECVBUF_UNLOCK(sc->intr);
+	return (0);
+}
+
+
 
 static device_method_t bthid_methods[] = {
 	DEVMETHOD(device_probe,		bthid_probe),
@@ -123,6 +136,7 @@ static device_method_t bthid_methods[] = {
 
 	DEVMETHOD(hid_intr_setup,	bthid_intr_setup),
 	DEVMETHOD(hid_intr_start,	bthid_intr_start),
+	DEVMETHOD(hid_intr_stop,	bthid_intr_stop),
 
 	DEVMETHOD_END
 };
