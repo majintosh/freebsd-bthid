@@ -67,6 +67,7 @@ bthid_attach(device_t dev)
 	struct bthid_ivars *ivar = device_get_ivars(dev);
 	sc->ctrl = ivar->ctrl;
 	sc->intr = ivar->intr;
+	sc->intr_task = malloc(sizeof(struct task), M_DEVBUF, M_WAITOK | M_ZERO);
 #if TESTING
 	TASK_INIT(sc->intr_task, 0, test_worker, sc->intr);
 	SOCK_RECVBUF_LOCK(sc->intr);
