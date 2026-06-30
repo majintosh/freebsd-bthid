@@ -22,6 +22,38 @@ struct bthid_softc {
 	hid_size_t	input_length;
 };
 
+#define TESTING 1
+
+#if TESTING
+static void
+test_worker(void *context, int pending)
+{
+	struct socket *s = (struct socket*) context;
+	int flag = MSG_DONTWAIT;
+	struct uio thing;
+	thing.uio_resid = 1000000;
+	thing.uio_td = curthread;
+	struct mbuf *m = NULL;
+	soreceive(s, NULL, &thing, &m, NULL, &flag);
+	if (m != NULL) {
+		uint8_t* payload = mtod(m, uint8_t *);
+		for (int i = 0; i<min(7, m->m_len/sizeof(uint8_t)); i++)
+		{
+			printf("%02X ", payload[i]);
+		}
+		printf("\n");
+	}
+}
+
+static int
+test_upcall(struct socket *s, void *arg, int which)
+{
+	struct task *intr_task = arg;
+	taskqueue_enqueue(taskqueue_thread, intr_task);
+	return SU_OK;
+}
+#endif
+
 static int
 bthid_probe(device_t dev)
 {
@@ -35,6 +67,12 @@ bthid_attach(device_t dev)
 	struct bthid_ivars *ivar = device_get_ivars(dev);
 	sc->ctrl = ivar->ctrl;
 	sc->intr = ivar->intr;
+#if TESTING
+	TASK_INIT(sc->intr_task, 0, test_worker, sc->intr);
+	SOCK_RECVBUF_LOCK(sc->intr);
+	soupcall_set(sc->intr, SO_RCV, test_upcall, sc->intr_task);
+	SOCK_RECVBUF_UNLOCK(sc->intr);
+#endif
 	return 0;
 }
 
