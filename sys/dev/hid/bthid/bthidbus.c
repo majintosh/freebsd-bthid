@@ -8,10 +8,7 @@
 #include <sys/socketvar.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
-#include <sys/uio.h>
 #include <sys/mutex.h>
-#include <sys/taskqueue.h>
-#include <sys/mbuf.h>
 
 #include <netgraph/bluetooth/include/ng_bluetooth.h>
 #include <netgraph/bluetooth/include/ng_hci.h>
@@ -19,36 +16,6 @@
 #include <netgraph/bluetooth/include/ng_btsocket.h>
 
 #include "bthid.h"
-
-static struct socket *bthid_ctrl, *bthid_intr;
-static struct task printer_task;
-
-static void
-printer(void *context, int pending)
-{
-	struct socket *s = (struct socket*) context;
-	int flag = MSG_DONTWAIT;
-	struct uio thing;
-	thing.uio_resid = 1000000;
-	thing.uio_td = curthread;
-	struct mbuf *m = NULL;
-	soreceive(s, NULL, &thing, &m, NULL, &flag);
-	if (m != NULL) {
-		uint8_t* payload = mtod(m, uint8_t *);
-		for (int i = 0; i<min(7, m->m_len/sizeof(uint8_t)); i++)
-		{	
-			printf("%02X ", payload[i]);
-		}
-		printf("\n");
-	}
-}
-
-static int
-soup(struct socket *s, void *arg, int which)
-{
-	taskqueue_enqueue(taskqueue_thread, &printer_task);
-	return SU_OK;
-}
 
 static int
 socket_setup(struct socket **sock, uint16_t psm)
@@ -94,10 +61,6 @@ socket_setup(struct socket **sock, uint16_t psm)
 
 	printf("We connected the socket!\n");
 
-	SOCK_RECVBUF_LOCK(*sock);
-	soupcall_set(*sock, SO_RCV, soup, NULL); // soup, like the food.
-	SOCK_RECVBUF_UNLOCK(*sock);
-
 	return error;
 
 cleanup: // Get rid of the label and goto stuff
@@ -105,20 +68,6 @@ cleanup: // Get rid of the label and goto stuff
 	*sock = NULL;
 	return error;
 }
-
-static void
-socket_close(struct socket *sock)
-{
-	if (sock != NULL) {
-		SOCK_RECVBUF_LOCK(sock);
-		soupcall_clear(sock, SO_RCV);
-		SOCK_RECVBUF_UNLOCK(sock);
-		soclose(sock);
-		printf("We closed the socket!\n");
-	}
-}
-
-static device_t bthidbus = NULL;
 
 static int
 bthidbus_probe(device_t dev)
@@ -168,7 +117,11 @@ new_connection(device_t bus, struct socket *ctrl, struct socket *intr)
 static int
 bthidbus_attach(device_t dev)
 {
-	new_connection(bthidbus, bthid_ctrl, bthid_intr);
+	struct socket *ctrl; 
+	struct socket *intr;
+	socket_setup(&ctrl, 0x11);
+	socket_setup(&intr, 0x13);
+	new_connection(dev, ctrl, intr);
 	return (0);
 }
 
@@ -176,9 +129,7 @@ static void
 bthidbus_identify(driver_t *driver, device_t parent)
 {
 	printf("BTHIDBUS IDENTIFIED\n");
-	if (bthidbus == NULL) {
-		bthidbus = BUS_ADD_CHILD(parent, 0, "bthidbus", DEVICE_UNIT_ANY);
-	}
+	BUS_ADD_CHILD(parent, 0, "bthidbus", DEVICE_UNIT_ANY);
 }
 static device_method_t bthidbus_methods[] = {
 	DEVMETHOD(device_identify,	bthidbus_identify),
@@ -197,17 +148,8 @@ bthidbus_modevent(module_t mod, int type, void *data)
 	int error = 0;
 	switch (type) {
 		case MOD_LOAD:
-			socket_setup(&bthid_ctrl, 0x11);
-			socket_setup(&bthid_intr, 0x13);
-			TASK_INIT(&printer_task, 0, printer, bthid_intr); // Worried this might run after our bthid_intr socket already receives a packet
 			break;
 		case MOD_UNLOAD:
-			if (bthidbus!=NULL)
-				device_delete_child(device_get_parent(bthidbus), bthidbus);
-			socket_close(bthid_ctrl);
-			bthid_ctrl = NULL;
-			socket_close(bthid_intr);
-			bthid_intr = NULL;
 			break;
 		default:
 			break;
@@ -221,5 +163,5 @@ static driver_t bthidbus_driver = {
 	0
 };
 
-DRIVER_MODULE(bthidbus, nexus, bthidbus_driver, bthidbus_modevent, NULL);
+DRIVER_MODULE(bthidbus, nexus, bthidbus_driver, NULL, NULL);
 MODULE_VERSION(bthidbus, 1);
