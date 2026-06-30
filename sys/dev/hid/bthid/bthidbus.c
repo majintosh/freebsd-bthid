@@ -119,8 +119,11 @@ bthidbus_attach(device_t dev)
 {
 	struct socket *ctrl; 
 	struct socket *intr;
-	socket_setup(&ctrl, 0x11);
-	socket_setup(&intr, 0x13);
+	if (socket_setup(&ctrl, 0x11) != 0 || socket_setup(&intr, 0x13) != 0) {
+		printf("Socket setup failed\n");
+		return -1;
+	}
+
 	new_connection(dev, ctrl, intr);
 	return (0);
 }
