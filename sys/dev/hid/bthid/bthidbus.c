@@ -128,11 +128,14 @@ bthidbus_attach(device_t dev)
 	return (0);
 }
 
+static device_t bthidbus;
+
 static void
 bthidbus_identify(driver_t *driver, device_t parent)
 {
 	printf("BTHIDBUS IDENTIFIED\n");
-	BUS_ADD_CHILD(parent, 0, "bthidbus", DEVICE_UNIT_ANY);
+	if (bthidbus == NULL)
+		bthidbus = BUS_ADD_CHILD(parent, 0, "bthidbus", DEVICE_UNIT_ANY);
 }
 static device_method_t bthidbus_methods[] = {
 	DEVMETHOD(device_identify,	bthidbus_identify),
@@ -153,6 +156,8 @@ bthidbus_modevent(module_t mod, int type, void *data)
 		case MOD_LOAD:
 			break;
 		case MOD_UNLOAD:
+			device_delete_child(device_get_parent(bthidbus), bthidbus);
+			bthidbus = NULL;
 			break;
 		default:
 			break;
@@ -166,5 +171,5 @@ static driver_t bthidbus_driver = {
 	0
 };
 
-DRIVER_MODULE(bthidbus, nexus, bthidbus_driver, NULL, NULL);
+DRIVER_MODULE(bthidbus, nexus, bthidbus_driver, bthidbus_modevent, NULL);
 MODULE_VERSION(bthidbus, 1);
