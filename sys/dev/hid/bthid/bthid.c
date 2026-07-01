@@ -89,35 +89,7 @@ bthid_probe(device_t dev)
 }
 
 
-/* This sets the info to match my switch pro controller */
-#define SET_SWITCH_DEVINFO(hw_ptr) \
-	strlcpy(hw_ptr->name, "Switch Pro Controller", sizeof(hw_ptr->name)); \
-	strlcpy(hw_ptr->serial, "Pro ID", sizeof(hw_ptr->serial)); \
-	hw_ptr->idBus = BUS_BLUETOOTH; \
-	hw_ptr->idVendor = 0x057e; \
-	hw_ptr->idProduct = 0x2009; \
-	hw_ptr->idVersion = 0x0001; \
-	hw_ptr->rdescsize = sizeof(switch_rdesc);
 
-static int
-bthid_attach(device_t dev)
-{
-	struct bthid_softc *sc = device_get_softc(dev);
-	bzero(sc, sizeof(struct bthid_softc));
-	struct bthid_ivars *ivar = device_get_ivars(dev);
-	sc->ctrl = ivar->ctrl;
-	sc->intr = ivar->intr;
-	sc->intr_task = malloc(sizeof(struct task), M_DEVBUF, M_WAITOK | M_ZERO);
-#if TESTING
-	sc->rdesc = switch_rdesc;
-	SET_SWITCH_DEVINFO((&sc->dinfo)); // We need to pass the devinfo as an ivar to hidbus later
-	TASK_INIT(sc->intr_task, 0, test_worker, sc->intr);
-	SOCK_RECVBUF_LOCK(sc->intr);
-	soupcall_set(sc->intr, SO_RCV, test_upcall, sc->intr_task);
-	SOCK_RECVBUF_UNLOCK(sc->intr);
-#endif
-	return 0;
-}
 
 static int
 socket_close(struct socket* sock)
@@ -142,6 +114,43 @@ bthid_detach(device_t dev)
 	return 0;
 }
 
+/* This sets the info to match my switch pro controller */
+#define SET_SWITCH_DEVINFO(hw_ptr) \
+	strlcpy(hw_ptr->name, "Switch Pro Controller", sizeof(hw_ptr->name)); \
+	strlcpy(hw_ptr->serial, "Pro ID", sizeof(hw_ptr->serial)); \
+	hw_ptr->idBus = BUS_BLUETOOTH; \
+	hw_ptr->idVendor = 0x057e; \
+	hw_ptr->idProduct = 0x2009; \
+	hw_ptr->idVersion = 0x0001; \
+	hw_ptr->rdescsize = sizeof(switch_rdesc);
+
+static int
+bthid_attach(device_t dev)
+{
+	struct bthid_softc *sc = device_get_softc(dev);
+	bzero(sc, sizeof(struct bthid_softc));
+	struct bthid_ivars *ivar = device_get_ivars(dev);
+	sc->ctrl = ivar->ctrl;
+	sc->intr = ivar->intr;
+	sc->intr_task = malloc(sizeof(struct task), M_DEVBUF, M_WAITOK | M_ZERO);
+	sc->rdesc = switch_rdesc;
+	SET_SWITCH_DEVINFO((&sc->dinfo)); // We need to pass the devinfo as an ivar to hidbus later
+#if TESTING
+	TASK_INIT(sc->intr_task, 0, test_worker, sc->intr);
+	SOCK_RECVBUF_LOCK(sc->intr);
+	soupcall_set(sc->intr, SO_RCV, test_upcall, sc->intr_task);
+	SOCK_RECVBUF_UNLOCK(sc->intr);
+#endif
+	device_t child = device_add_child(dev, "hidbus", DEVICE_UNIT_ANY);
+	if (child == NULL) {
+		printf("Couldn't add hidbus device\n");
+		return (ENOMEM);
+		bthid_detach(dev);
+	}
+	device_set_ivars(child, &sc->dinfo);
+	bus_attach_children(dev);
+	return 0;
+}
 
 static void
 intr_worker(void* context, int pending)
