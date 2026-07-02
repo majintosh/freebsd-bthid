@@ -17,7 +17,7 @@
 struct bthid_softc {
 	struct socket*	ctrl;
 	struct socket*	intr;
-	struct task*	intr_task;
+	struct task	intr_task;
 	hid_intr_t*	intr_handler;
 	void*		intr_ctx;
 	hid_size_t	input_length;
@@ -132,13 +132,12 @@ bthid_attach(device_t dev)
 	struct bthid_ivars *ivar = device_get_ivars(dev);
 	sc->ctrl = ivar->ctrl;
 	sc->intr = ivar->intr;
-	sc->intr_task = malloc(sizeof(struct task), M_DEVBUF, M_WAITOK | M_ZERO);
 	sc->rdesc = switch_rdesc;
 	SET_SWITCH_DEVINFO((&sc->dinfo)); // We need to pass the devinfo as an ivar to hidbus later
 #if TESTING
-	TASK_INIT(sc->intr_task, 0, test_worker, sc->intr);
+	TASK_INIT(&sc->intr_task, 0, test_worker, sc->intr);
 	SOCK_RECVBUF_LOCK(sc->intr);
-	soupcall_set(sc->intr, SO_RCV, test_upcall, sc->intr_task);
+	soupcall_set(sc->intr, SO_RCV, test_upcall, &sc->intr_task);
 	SOCK_RECVBUF_UNLOCK(sc->intr);
 #endif
 	device_t child = device_add_child(dev, "hidbus", DEVICE_UNIT_ANY);
@@ -192,7 +191,7 @@ bthid_intr_setup(device_t dev, device_t child __unused, hid_intr_t intr,
 	sc->intr_handler = intr;
 	sc->intr_ctx = context;
 	sc->input_length = rdesc->isize;
-	TASK_INIT(sc->intr_task, 0, intr_worker, sc);
+	TASK_INIT(&sc->intr_task, 0, intr_worker, sc);
 }
 
 static int
@@ -200,7 +199,7 @@ bthid_intr_start(device_t dev, device_t child __unused)
 {
 	struct bthid_softc *sc = device_get_softc(dev);
 	SOCK_RECVBUF_LOCK(sc->intr);
-	soupcall_set(sc->intr, SO_RCV, intr_upcall, sc->intr_task);
+	soupcall_set(sc->intr, SO_RCV, intr_upcall, &sc->intr_task);
 	SOCK_RECVBUF_UNLOCK(sc->intr);
 
 	return (0);
