@@ -248,3 +248,5 @@ static driver_t bthid_driver = {
 
 DRIVER_MODULE(bthid, bthidbus, bthid_driver, NULL, NULL);
 MODULE_VERSION(bthid, 1);
+extern driver_t hidbus_driver;
+DRIVER_MODULE(hidbus, bthid, hidbus_driver, 0, 0);
