@@ -235,7 +235,7 @@ intr_worker(void* context, int pending)
 	soreceive(sc->intr, NULL, &uio, &m, NULL, &flag);
 	if (m!=NULL) {
 		printf("Packet received\n"); 
-		// Need to shift the mbuf to get rid of the header bytes
+		m_adj(m, 1); // Strip the bluetooth header from the packet
 		uint8_t *payload = mtod(m, uint8_t *);
 		sc->intr_handler(sc->intr_ctx, payload, m->m_len);
 	}
