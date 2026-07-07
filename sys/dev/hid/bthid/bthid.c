@@ -15,14 +15,14 @@
 #include "hid_if.h"
 
 struct bthid_softc {
-	struct socket*	ctrl;
-	struct socket*	intr;
-	struct task	intr_task;
-	hid_intr_t*	intr_handler;
-	void*		intr_ctx;
-	hid_size_t	input_length;
-	void*		rdesc;
-	struct hid_device_info dinfo;
+	struct socket*			ctrl;
+	struct socket*			intr;
+	struct task			intr_task;
+	hid_intr_t*			intr_handler;
+	void*				intr_ctx;
+	hid_size_t			input_length;
+	struct hid_device_info		dinfo;
+	struct hid_rdesc_info		rdesc;
 };
 
 #define TESTING 1
@@ -193,12 +193,12 @@ bthid_attach(device_t dev)
 	sc->ctrl = ivar->ctrl;
 	sc->intr = ivar->intr;
 #ifdef SWITCH
-	sc->rdesc = switch_rdesc;
+	sc->rdesc.data = switch_rdesc;
 	SET_SWITCH_DEVINFO((&sc->dinfo));
 #endif
 
 #ifdef DSENSE
-	sc->rdesc = dsense_rdesc;
+	sc->rdesc.data = dsense_rdesc;
 	SET_DSENSE_DEVINFO((&sc->dinfo));
 #endif
 #if TESTING
@@ -229,12 +229,11 @@ intr_worker(void* context, int pending)
 	// multiple input packets at a time rather than just 1, but this shouldn't be an issue, since the worker thread runs
 	// as soon as a packet is received. Though we could receive another packet before the worker thread runs...
 	// The alternative approach is to use the isize of hid_rdsec_info and add the size of the packet header to it. Gonna implement this later
-	uio.uio_resid = 1000000; 
+	uio.uio_resid = sc->rdesc.isize + 1;
 	uio.uio_td = curthread;
 	struct mbuf *m = NULL;
 	soreceive(sc->intr, NULL, &uio, &m, NULL, &flag);
 	if (m!=NULL) {
-		printf("Packet received\n"); 
 		m_adj(m, 1); // Strip the bluetooth header from the packet
 		uint8_t *payload = mtod(m, uint8_t *);
 		sc->intr_handler(sc->intr_ctx, payload, m->m_len);
@@ -257,7 +256,8 @@ bthid_intr_setup(device_t dev, device_t child __unused, hid_intr_t intr,
 	struct bthid_softc *sc = device_get_softc(dev);
 	sc->intr_handler = intr;
 	sc->intr_ctx = context;
-	sc->input_length = rdesc->isize;
+	// Should we just copy the value of rdesc into our softc's rdesc?
+	sc->rdesc.isize = rdesc->isize;
 	TASK_INIT(&sc->intr_task, 0, intr_worker, sc);
 }
 
@@ -288,7 +288,7 @@ bthid_get_rdesc(device_t dev, device_t child __unused, void *buf,
 		hid_size_t len)
 {
 	struct bthid_softc *sc = device_get_softc(dev);
-	memcpy(buf, sc->rdesc, len);
+	memcpy(buf, sc->rdesc.data, len);
 	return (0);
 }
 
