@@ -25,7 +25,7 @@ struct bthid_softc {
 	struct hid_rdesc_info		rdesc;
 };
 
-#define TESTING 1
+#define TESTING 0
 
 #if TESTING
 static void
@@ -52,13 +52,13 @@ static int
 test_upcall(struct socket *s, void *arg, int which)
 {
 	struct task *intr_task = arg;
-	taskqueue_enqueue(taskqueue_thread, intr_task);
+	taskqueue_enqueue(taskqueue_swi, intr_task);
 	return SU_OK;
 }
 
 #endif
 
-#define DSENSE
+#define SWITCH
 
 #ifdef SWITCH
 static uint8_t switch_rdesc[] = {
@@ -225,10 +225,6 @@ intr_worker(void* context, int pending)
 	
 	struct uio uio;
 	int flag = MSG_DONTWAIT;
-	// We set resid to 1m to drain everything in the buffer. There is a worry that the intr worker would then retrieve
-	// multiple input packets at a time rather than just 1, but this shouldn't be an issue, since the worker thread runs
-	// as soon as a packet is received. Though we could receive another packet before the worker thread runs...
-	// The alternative approach is to use the isize of hid_rdsec_info and add the size of the packet header to it. Gonna implement this later
 	uio.uio_resid = sc->rdesc.isize + 1;
 	uio.uio_td = curthread;
 	struct mbuf *m = NULL;
@@ -245,7 +241,7 @@ static int
 intr_upcall(struct socket *s, void *arg, int which)
 {
 	struct task *intr_task = arg;
-	taskqueue_enqueue(taskqueue_thread, intr_task);
+	taskqueue_enqueue(taskqueue_swi, intr_task);
 	return SU_OK;
 }
 
@@ -279,6 +275,7 @@ bthid_intr_stop(device_t dev, device_t child __unused)
 	SOCK_RECVBUF_LOCK(sc->intr);
 	if (sc->intr->so_rcv.sb_upcall != NULL)
 		soupcall_clear(sc->intr, SO_RCV);
+	taskqueue_drain(taskqueue_swi, &sc->intr_task);
 	SOCK_RECVBUF_UNLOCK(sc->intr);
 	return (0);
 }
