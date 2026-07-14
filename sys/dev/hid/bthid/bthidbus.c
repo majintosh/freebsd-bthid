@@ -15,7 +15,12 @@
 #include <netgraph/bluetooth/include/ng_l2cap.h>
 #include <netgraph/bluetooth/include/ng_btsocket.h>
 
+#include <sys/conf.h>
+
 #include "bthid.h"
+struct bthidbus_softc {
+	struct cdev	*cdev;
+};
 
 static int
 socket_setup(struct socket **sock, uint16_t psm)
