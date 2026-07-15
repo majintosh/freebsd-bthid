@@ -18,6 +18,8 @@
 #include <sys/conf.h>
 
 #include "bthid.h"
+#include "bthidbus.h"
+
 struct bthidbus_softc {
 	struct cdev	*cdev;
 };
@@ -86,6 +88,9 @@ static int
 bthidbus_detach(device_t dev)
 {
 	printf("BTHIDBUS DETACHED\n");
+	struct bthidbus_softc *sc = device_get_softc(dev);
+	sc->cdev->si_drv1 = NULL;
+	destroy_dev(sc->cdev);
 	device_delete_children(dev);
 	return (0);
 }
@@ -119,6 +124,14 @@ new_connection(device_t bus, struct socket *ctrl, struct socket *intr)
 	bus_attach_children(bus);
 }
 
+static d_ioctl_t bthidbus_ioctl;
+
+static struct cdevsw bthidbus_cdevsw = {
+	.d_version =	D_VERSION,
+	.d_ioctl =	bthidbus_ioctl,
+	.d_name =	"bthidbus",
+};
+
 static int
 bthidbus_attach(device_t dev)
 {
@@ -128,6 +141,16 @@ bthidbus_attach(device_t dev)
 		printf("Socket setup failed\n");
 		return -1;
 	}
+
+	struct bthidbus_softc *sc = device_get_softc(dev);
+	struct make_dev_args mda;
+	make_dev_args_init(&mda);
+	mda.mda_devsw = &bthidbus_cdevsw;
+	mda.mda_uid = UID_ROOT;
+	mda.mda_si_drv1 = sc;
+
+
+	make_dev_s(&mda, &sc->cdev, "bthidbus%d", device_get_unit(dev));
 
 	new_connection(dev, ctrl, intr);
 	return (0);
@@ -141,6 +164,18 @@ bthidbus_identify(driver_t *driver, device_t parent)
 	printf("BTHIDBUS IDENTIFIED\n");
 	if (bthidbus == NULL)
 		bthidbus = BUS_ADD_CHILD(parent, 0, "bthidbus", DEVICE_UNIT_ANY);
+}
+
+
+static int
+bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thread *td) 
+{
+	struct bthidbus_new_connection *con = (struct bthidbus_new_connection *) addr;
+	switch (cmd) {
+		case BTHIDBUS_NEW_CONNECTION:
+			return 1;
+	}
+	return 0;
 }
 static device_method_t bthidbus_methods[] = {
 	DEVMETHOD(device_identify,	bthidbus_identify),
@@ -173,7 +208,7 @@ bthidbus_modevent(module_t mod, int type, void *data)
 static driver_t bthidbus_driver = {
 	"bthidbus",
 	bthidbus_methods,
-	0
+	sizeof(struct bthidbus_softc)
 };
 
 DRIVER_MODULE(bthidbus, nexus, bthidbus_driver, bthidbus_modevent, NULL);
