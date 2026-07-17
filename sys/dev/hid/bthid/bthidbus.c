@@ -26,58 +26,6 @@ struct bthidbus_softc {
 };
 
 static int
-socket_setup(struct socket **sock, uint16_t psm)
-{
-	struct sockaddr_l2cap l2addr;
-	int error = 0;
-	error = socreate(PF_BLUETOOTH, sock, SOCK_SEQPACKET,
-	    BLUETOOTH_PROTO_L2CAP, curthread->td_ucred, curthread);
-	if (error != 0) {
-		printf("We couldn't create the socket!\n");
-		return error;
-	}
-	printf("We created the socket!\n");
-
-	l2addr.l2cap_len = sizeof(l2addr);
-	l2addr.l2cap_family = AF_BLUETOOTH;
-	l2addr.l2cap_bdaddr = *NG_HCI_BDADDR_ANY;
-	l2addr.l2cap_psm = htole16(psm);
-	l2addr.l2cap_bdaddr_type = BDADDR_BREDR;
-	l2addr.l2cap_cid = 0;
-
-	error = sobind(*sock, (struct sockaddr *)&l2addr, curthread);
-
-	if (error != 0) {
-		printf("We couldn't bind the socket!\n");
-		goto cleanup;
-	}
-
-	printf("We bound the socket!\n"); // Or is it "binded"?
-	
-	l2addr.l2cap_psm = htole16(psm); 
-
-	bdaddr_t controller_addr = {{0x00, 0x11, 0x22, 0x33, 0x44, 0x55}};
-
-	memcpy(&l2addr.l2cap_bdaddr, &controller_addr, sizeof(l2addr.l2cap_bdaddr));
-
-	error = soconnect(*sock, (struct sockaddr *) &l2addr, curthread);
-
-	if (error != 0) {
-		printf("We couldn't connect the socket!\n");
-		goto cleanup;
-	}
-
-	printf("We connected the socket!\n");
-
-	return error;
-
-cleanup: // Get rid of the label and goto stuff
-	soclose(*sock);
-	*sock = NULL;
-	return error;
-}
-
-static int
 bthidbus_probe(device_t dev)
 {
 	printf("BTHIDBUS PROBED\n");
@@ -136,13 +84,6 @@ static struct cdevsw bthidbus_cdevsw = {
 static int
 bthidbus_attach(device_t dev)
 {
-	struct socket *ctrl; 
-	struct socket *intr;
-	if (socket_setup(&ctrl, 0x11) != 0 || socket_setup(&intr, 0x13) != 0) {
-		printf("Socket setup failed\n");
-		return -1;
-	}
-
 	struct bthidbus_softc *sc = device_get_softc(dev);
 	struct make_dev_args mda;
 	make_dev_args_init(&mda);
@@ -153,7 +94,6 @@ bthidbus_attach(device_t dev)
 
 	make_dev_s(&mda, &sc->cdev, "bthidbus%d", device_get_unit(dev));
 
-	new_connection(dev, ctrl, intr);
 	return (0);
 }
 
