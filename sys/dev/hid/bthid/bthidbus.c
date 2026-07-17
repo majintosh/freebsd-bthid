@@ -111,12 +111,19 @@ bthidbus_identify(driver_t *driver, device_t parent)
 static int
 bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thread *td) 
 {
-	struct bthidbus_new_connection *con = (struct bthidbus_new_connection *) addr;
+	struct bthidbus_new_connection *con;
+	struct bthidbus_softc *sc = dev->si_drv1;
 	switch (cmd) {
 		case BTHIDBUS_NEW_CONNECTION:
-			return 1;
+			con = (struct bthidbus_new_connection *) addr;
+			uint8_t *kern_rdesc = malloc(con->rdesc_len, M_DEVBUF, M_WAITOK | M_ZERO);
+			int err = copyin(con->rdesc, kern_rdesc, con->rdesc_len);
+			if (err != 0) {
+				free(kern_rdesc, M_DEVBUF);
+			}
+			return 0;
 	}
-	return 0;
+	return 1;
 }
 static device_method_t bthidbus_methods[] = {
 	DEVMETHOD(device_identify,	bthidbus_identify),
