@@ -22,6 +22,7 @@
 
 struct bthidbus_softc {
 	struct cdev	*cdev;
+	device_t dev;
 };
 
 static int
