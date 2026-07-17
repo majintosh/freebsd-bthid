@@ -60,17 +60,23 @@ bthidbus_add_child(device_t dev, u_int order, const char *name, int unit)
 }
 
 static void
-new_connection(device_t bus, struct socket *ctrl, struct socket *intr)
+new_connection(device_t bus, struct bthidbus_new_connection *con)
 {
 	device_t child;
 	child = BUS_ADD_CHILD(bus, 0, "bthid", DEVICE_UNIT_ANY);
 
-	if (child == NULL)
+	if (child == NULL) {
+		free(con->rdesc, M_DEVBUF);
 		return;
+	}
 	struct bthid_ivars *ivars = device_get_ivars(child);
-	ivars->ctrl = ctrl;
-	ivars->intr = intr;
-	bus_attach_children(bus);
+	ivars->vendorId = con->vendorId;
+	ivars->productId = con->productId;
+	ivars->versionId = con->versionId;
+	ivars->rdesc = con->rdesc;
+	ivars->rdesc_len = con->rdesc_len; // Should probably just make bthid_ivars and bthidbus_new_connection the same struct
+
+	device_probe_and_attach(child);
 }
 
 static d_ioctl_t bthidbus_ioctl;
@@ -121,6 +127,8 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 			if (err != 0) {
 				free(kern_rdesc, M_DEVBUF);
 			}
+			con->rdesc = kern_rdesc;
+			new_connection(sc->dev, con);
 			return 0;
 	}
 	return 1;
