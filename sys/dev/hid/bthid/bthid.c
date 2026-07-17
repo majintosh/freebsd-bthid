@@ -161,6 +161,7 @@ bthid_detach(device_t dev)
 	struct bthid_softc *sc = device_get_softc(dev);
 	socket_close(sc->ctrl);
 	socket_close(sc->intr);
+	free(sc->rdesc.data, M_DEVBUF);
 	return 0;
 }
 
@@ -190,28 +191,17 @@ bthid_attach(device_t dev)
 	struct bthid_softc *sc = device_get_softc(dev);
 	bzero(sc, sizeof(struct bthid_softc));
 	struct bthid_ivars *ivar = device_get_ivars(dev);
-	sc->ctrl = ivar->ctrl;
-	sc->intr = ivar->intr;
-#ifdef SWITCH
-	sc->rdesc.data = switch_rdesc;
-	SET_SWITCH_DEVINFO((&sc->dinfo));
-#endif
-
-#ifdef DSENSE
-	sc->rdesc.data = dsense_rdesc;
-	SET_DSENSE_DEVINFO((&sc->dinfo));
-#endif
-#if TESTING
-	TASK_INIT(&sc->intr_task, 0, test_worker, sc->intr);
-	SOCK_RECVBUF_LOCK(sc->intr);
-	soupcall_set(sc->intr, SO_RCV, test_upcall, &sc->intr_task);
-	SOCK_RECVBUF_UNLOCK(sc->intr);
-#endif
+	struct hid_device_info *hw = &sc->dinfo;
+	sc->rdesc.data = ivar->rdesc;
+	hw->idBus = BUS_BLUETOOTH;
+	hw->idVendor = ivar->vendorId;
+	hw->idProduct = ivar->productId;
+	hw->idVersion = ivar->versionId;
+	hw->rdescsize = ivar->rdesc_len;
 	device_t child = device_add_child(dev, "hidbus", DEVICE_UNIT_ANY);
 	if (child == NULL) {
 		printf("Couldn't add hidbus device\n");
 		return (ENOMEM);
-		bthid_detach(dev);
 	}
 	device_set_ivars(child, &sc->dinfo);
 	bus_attach_children(dev);
