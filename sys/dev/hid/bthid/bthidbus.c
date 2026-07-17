@@ -91,6 +91,7 @@ static int
 bthidbus_attach(device_t dev)
 {
 	struct bthidbus_softc *sc = device_get_softc(dev);
+	sc->dev = dev;
 	struct make_dev_args mda;
 	make_dev_args_init(&mda);
 	mda.mda_devsw = &bthidbus_cdevsw;
