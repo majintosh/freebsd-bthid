@@ -163,9 +163,6 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 			ctrl_sock = ctrl_file->f_data;
 			intr_sock = ctrl_file->f_data;
 
-			soref(ctrl_sock);
-			soref(intr_sock);
-
 			new_connection(sc->dev, con, ctrl_sock, intr_sock, ctrl_file, intr_file);
 			return 0;
 	}
