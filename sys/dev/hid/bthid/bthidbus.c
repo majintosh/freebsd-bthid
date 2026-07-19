@@ -85,7 +85,9 @@ new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket*
 	ivars->ctrl_file = ctrl_file;
 	ivars->intr_file = intr_file;
 
+	mtx_lock(&Giant);
 	device_probe_and_attach(child);
+	mtx_unlock(&Giant);
 }
 
 static d_ioctl_t bthidbus_ioctl;
