@@ -64,7 +64,8 @@ bthidbus_add_child(device_t dev, u_int order, const char *name, int unit)
 }
 
 static void
-new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket* ctrl_sock, struct socket* intr_sock)
+new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket* ctrl_sock, struct socket* intr_sock,
+		struct file* ctrl_file, struct file* intr_file)
 {
 	device_t child;
 	child = BUS_ADD_CHILD(bus, 0, "bthid", DEVICE_UNIT_ANY);
@@ -81,6 +82,8 @@ new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket*
 	ivars->rdesc_len = con->rdesc_len;
 	ivars->ctrl_sock = ctrl_sock;
 	ivars->intr_sock = intr_sock;
+	ivars->ctrl_file = ctrl_file;
+	ivars->intr_file = intr_file;
 
 	device_probe_and_attach(child);
 }
@@ -137,33 +140,33 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 			}
 			con->rdesc = kern_rdesc;
 			struct socket *ctrl_sock, *intr_sock;
-			struct file *f_ctrl, *f_intr;
+			struct file *ctrl_file, *intr_file;
 			cap_rights_t rights;
 			cap_rights_init_one(&rights, CAP_IOCTL);
-			if (fget(td, con->ctrl_sock, &rights, &f_ctrl) != 0) {
+			if (fget(td, con->ctrl_sock, &rights, &ctrl_file) != 0) {
 				free(kern_rdesc, M_DEVBUF);
 				return -1;
 			}
-			if (fget(td, con->intr_sock, &rights, &f_intr) != 0) {
+			if (fget(td, con->intr_sock, &rights, &intr_file) != 0) {
 				free(kern_rdesc, M_DEVBUF);
-				fdrop(f_ctrl, td);
-				return -1;
-			}
-
-			if (f_ctrl->f_type != DTYPE_SOCKET || f_ctrl->f_type != DTYPE_SOCKET) {
-				free(kern_rdesc, M_DEVBUF);
-				fdrop(f_ctrl, td);
-				fdrop(f_intr, td);
+				fdrop(ctrl_file, td);
 				return -1;
 			}
 
-			ctrl_sock = f_ctrl->f_data;
-			intr_sock = f_ctrl->f_data;
+			if (ctrl_file->f_type != DTYPE_SOCKET || ctrl_file->f_type != DTYPE_SOCKET) {
+				free(kern_rdesc, M_DEVBUF);
+				fdrop(ctrl_file, td);
+				fdrop(intr_file, td);
+				return -1;
+			}
+
+			ctrl_sock = ctrl_file->f_data;
+			intr_sock = ctrl_file->f_data;
 
 			soref(ctrl_sock);
 			soref(intr_sock);
 
-			new_connection(sc->dev, con, ctrl_sock, intr_sock);
+			new_connection(sc->dev, con, ctrl_sock, intr_sock, ctrl_file, intr_file);
 			return 0;
 	}
 	return -1;
