@@ -2,8 +2,8 @@
 #include <sys/types.h>
 
 struct bthid_ivars {
-	int ctrl_sock;
-	int intr_sock;
+	struct socket* ctrl_sock;
+	struct socket* intr_sock;
 	uint16_t vendorId;
 	uint16_t productId;
 	uint16_t versionId;
