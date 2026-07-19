@@ -191,13 +191,14 @@ bthid_attach(device_t dev)
 	struct bthid_softc *sc = device_get_softc(dev);
 	bzero(sc, sizeof(struct bthid_softc));
 	struct bthid_ivars *ivar = device_get_ivars(dev);
-	struct hid_device_info *hw = &sc->dinfo;
 	sc->rdesc.data = ivar->rdesc;
-	hw->idBus = BUS_BLUETOOTH;
-	hw->idVendor = ivar->vendorId;
-	hw->idProduct = ivar->productId;
-	hw->idVersion = ivar->versionId;
-	hw->rdescsize = ivar->rdesc_len;
+	sc->ctrl = ivar->ctrl_sock;
+	sc->intr = ivar->intr_sock;
+	sc->dinfo.idBus = BUS_BLUETOOTH;
+	sc->dinfo.idVendor = ivar->vendorId;
+	sc->dinfo.idProduct = ivar->productId;
+	sc->dinfo.idVersion = ivar->versionId;
+	sc->dinfo.rdescsize = ivar->rdesc_len;
 	device_t child = device_add_child(dev, "hidbus", DEVICE_UNIT_ANY);
 	if (child == NULL) {
 		printf("Couldn't add hidbus device\n");
