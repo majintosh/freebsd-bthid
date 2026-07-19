@@ -2,6 +2,10 @@
 #include <sys/bus.h>
 #include <sys/module.h>
 #include <sys/kernel.h>
+#include <sys/file.h>
+
+#include <sys/capsicum.h>
+#include <sys/caprights.h>
 
 #include <sys/bitstring.h>
 #include <sys/socket.h>
@@ -60,7 +64,7 @@ bthidbus_add_child(device_t dev, u_int order, const char *name, int unit)
 }
 
 static void
-new_connection(device_t bus, struct bthidbus_new_connection *con)
+new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket* ctrl_sock, struct socket* intr_sock)
 {
 	device_t child;
 	child = BUS_ADD_CHILD(bus, 0, "bthid", DEVICE_UNIT_ANY);
@@ -74,7 +78,9 @@ new_connection(device_t bus, struct bthidbus_new_connection *con)
 	ivars->productId = con->productId;
 	ivars->versionId = con->versionId;
 	ivars->rdesc = con->rdesc;
-	ivars->rdesc_len = con->rdesc_len; // Should probably just make bthid_ivars and bthidbus_new_connection the same struct
+	ivars->rdesc_len = con->rdesc_len;
+	ivars->ctrl_sock = ctrl_sock;
+	ivars->intr_sock = intr_sock;
 
 	device_probe_and_attach(child);
 }
@@ -127,12 +133,40 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 			int err = copyin(con->rdesc, kern_rdesc, con->rdesc_len);
 			if (err != 0) {
 				free(kern_rdesc, M_DEVBUF);
+				return -1;
 			}
 			con->rdesc = kern_rdesc;
-			new_connection(sc->dev, con);
+			struct socket *ctrl_sock, *intr_sock;
+			struct file *f_ctrl, *f_intr;
+			cap_rights_t rights;
+			cap_rights_init_one(&rights, CAP_IOCTL);
+			if (fget(td, con->ctrl_sock, &rights, &f_ctrl) != 0) {
+				free(kern_rdesc, M_DEVBUF);
+				return -1;
+			}
+			if (fget(td, con->intr_sock, &rights, &f_intr) != 0) {
+				free(kern_rdesc, M_DEVBUF);
+				fdrop(f_ctrl, td);
+				return -1;
+			}
+
+			if (f_ctrl->f_type != DTYPE_SOCKET || f_ctrl->f_type != DTYPE_SOCKET) {
+				free(kern_rdesc, M_DEVBUF);
+				fdrop(f_ctrl, td);
+				fdrop(f_intr, td);
+				return -1;
+			}
+
+			ctrl_sock = f_ctrl->f_data;
+			intr_sock = f_ctrl->f_data;
+
+			soref(ctrl_sock);
+			soref(intr_sock);
+
+			new_connection(sc->dev, con, ctrl_sock, intr_sock);
 			return 0;
 	}
-	return 1;
+	return -1;
 }
 static device_method_t bthidbus_methods[] = {
 	DEVMETHOD(device_identify,	bthidbus_identify),
