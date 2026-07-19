@@ -13,6 +13,7 @@
 
 #include "bthid.h"
 #include "hid_if.h"
+#include <sys/file.h>
 
 struct bthid_softc {
 	struct socket*			ctrl;
@@ -23,6 +24,12 @@ struct bthid_softc {
 	hid_size_t			input_length;
 	struct hid_device_info		dinfo;
 	struct hid_rdesc_info		rdesc;
+
+	/* Despite having the underlying reference to the sockets, 
+	 * we still keep references to the files so that the sockets 
+	 * aren't closed prematurely by userspace */
+	struct file*			ctrl_file;
+	struct file*			intr_file;
 };
 
 #define TESTING 0
@@ -142,7 +149,7 @@ bthid_probe(device_t dev)
 
 
 static int
-socket_close(struct socket* sock)
+socket_close(struct socket* sock, struct file* f)
 {
 	if (sock == NULL)
 		return 0;
@@ -151,7 +158,7 @@ socket_close(struct socket* sock)
 		soupcall_clear(sock, SO_RCV);
 	SOCK_RECVBUF_UNLOCK(sock);
 	// Need to clear taskqueue threads before closing socket
-	soclose(sock);
+	fdrop(f, curthread);
 	return 0;
 }
 
@@ -159,8 +166,8 @@ static int
 bthid_detach(device_t dev)
 {
 	struct bthid_softc *sc = device_get_softc(dev);
-	socket_close(sc->ctrl);
-	socket_close(sc->intr);
+	socket_close(sc->ctrl, sc->ctrl_file);
+	socket_close(sc->intr, sc->intr_file);
 	free(sc->rdesc.data, M_DEVBUF);
 	return 0;
 }
@@ -188,22 +195,26 @@ bthid_detach(device_t dev)
 static int
 bthid_attach(device_t dev)
 {
+	struct bthid_ivars *ivar = device_get_ivars(dev);
+	device_t child = device_add_child(dev, "hidbus", DEVICE_UNIT_ANY);
+	if (child == NULL) {
+		printf("Couldn't add hidbus device\n");
+		free(ivar->rdesc, M_DEVBUF);
+		return (ENOMEM);
+	}
 	struct bthid_softc *sc = device_get_softc(dev);
 	bzero(sc, sizeof(struct bthid_softc));
-	struct bthid_ivars *ivar = device_get_ivars(dev);
 	sc->rdesc.data = ivar->rdesc;
 	sc->ctrl = ivar->ctrl_sock;
 	sc->intr = ivar->intr_sock;
+	sc->ctrl_file = ivar->ctrl_file;
+	sc->intr_file = ivar->intr_file;
 	sc->dinfo.idBus = BUS_BLUETOOTH;
 	sc->dinfo.idVendor = ivar->vendorId;
 	sc->dinfo.idProduct = ivar->productId;
 	sc->dinfo.idVersion = ivar->versionId;
 	sc->dinfo.rdescsize = ivar->rdesc_len;
-	device_t child = device_add_child(dev, "hidbus", DEVICE_UNIT_ANY);
-	if (child == NULL) {
-		printf("Couldn't add hidbus device\n");
-		return (ENOMEM);
-	}
+
 	device_set_ivars(child, &sc->dinfo);
 	bus_attach_children(dev);
 	return 0;
