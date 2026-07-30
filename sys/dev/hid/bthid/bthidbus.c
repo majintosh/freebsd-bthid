@@ -32,7 +32,6 @@ struct bthidbus_softc {
 static int
 bthidbus_probe(device_t dev)
 {
-	printf("BTHIDBUS PROBED\n");
 	return (0);
 }
 
@@ -40,7 +39,6 @@ bthidbus_probe(device_t dev)
 static int
 bthidbus_detach(device_t dev)
 {
-	printf("BTHIDBUS DETACHED\n");
 	struct bthidbus_softc *sc = device_get_softc(dev);
 	sc->cdev->si_drv1 = NULL;
 	destroy_dev(sc->cdev);
@@ -120,7 +118,6 @@ static device_t bthidbus;
 static void
 bthidbus_identify(driver_t *driver, device_t parent)
 {
-	printf("BTHIDBUS IDENTIFIED\n");
 	if (bthidbus == NULL)
 		bthidbus = BUS_ADD_CHILD(parent, 0, "bthidbus", DEVICE_UNIT_ANY);
 }
@@ -164,6 +161,7 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 
 			ctrl_sock = ctrl_file->f_data;
 			intr_sock = intr_file->f_data;
+
 
 			new_connection(sc->dev, con, ctrl_sock, intr_sock, ctrl_file, intr_file);
 			return 0;
