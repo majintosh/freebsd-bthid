@@ -73,9 +73,9 @@ new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket*
 		return;
 	}
 	struct bthid_ivars *ivars = device_get_ivars(child);
-	ivars->vendorId = con->vendorId;
-	ivars->productId = con->productId;
-	ivars->versionId = con->versionId;
+	ivars->vendor_id = con->vendor_id;
+	ivars->product_id = con->product_id;
+	ivars->version_id = con->version_id;
 	ivars->rdesc = con->rdesc;
 	ivars->rdesc_len = con->rdesc_len;
 	ivars->ctrl_sock = ctrl_sock;

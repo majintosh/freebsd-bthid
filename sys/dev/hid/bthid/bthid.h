@@ -7,9 +7,9 @@ struct bthid_ivars {
 	struct socket* intr_sock;
 	struct file* ctrl_file;
 	struct file* intr_file;
-	uint16_t vendorId;
-	uint16_t productId;
-	uint16_t versionId;
+	uint16_t vendor_id;
+	uint16_t product_id;
+	uint16_t version_id;
 	void *rdesc;
 	size_t rdesc_len;
 };

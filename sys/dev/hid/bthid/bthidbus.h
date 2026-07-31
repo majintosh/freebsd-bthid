@@ -4,9 +4,9 @@
 struct bthidbus_new_connection {
 	int ctrl_sock;
 	int intr_sock;
-	uint16_t vendorId;
-	uint16_t productId;
-	uint16_t versionId;
+	uint16_t vendor_id;
+	uint16_t product_id;
+	uint16_t version_id;
 	void *rdesc;
 	size_t rdesc_len;
 

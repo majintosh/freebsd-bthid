@@ -83,9 +83,9 @@ bthid_attach(device_t dev)
 	sc->ctrl_file = ivar->ctrl_file;
 	sc->intr_file = ivar->intr_file;
 	sc->dinfo.idBus = BUS_BLUETOOTH;
-	sc->dinfo.idVendor = ivar->vendorId;
-	sc->dinfo.idProduct = ivar->productId;
-	sc->dinfo.idVersion = ivar->versionId;
+	sc->dinfo.idVendor = ivar->vendor_id;
+	sc->dinfo.idProduct = ivar->product_id;
+	sc->dinfo.idVersion = ivar->version_id;
 	sc->dinfo.rdescsize = ivar->rdesc_len;
 
 	device_set_ivars(child, &sc->dinfo);
