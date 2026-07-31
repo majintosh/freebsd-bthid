@@ -24,6 +24,7 @@
 #include "bthid.h"
 #include "bthidbus.h"
 
+#define RDESC_MAX_LEN 4096
 struct bthidbus_softc {
 	struct cdev	*cdev;
 	device_t dev;
@@ -133,8 +134,9 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 	switch (cmd) {
 		case BTHIDBUS_NEW_CONNECTION:
 			con = (struct bthidbus_new_connection *) addr;
-			uint8_t *kern_rdesc = malloc(con->rdesc_len, M_DEVBUF, M_WAITOK | M_ZERO);
-			int err = copyin(con->rdesc, kern_rdesc, con->rdesc_len);
+			size_t rdesc_len = con->rdesc_len > RDESC_MAX_LEN ? RDESC_MAX_LEN : con->rdesc_len;
+			uint8_t *kern_rdesc = malloc(rdesc_len, M_DEVBUF, M_WAITOK | M_ZERO);
+			int err = copyin(con->rdesc, kern_rdesc, rdesc_len);
 			if (err != 0) {
 				free(kern_rdesc, M_DEVBUF);
 				return -1;
