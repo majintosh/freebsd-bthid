@@ -57,6 +57,63 @@
 static int32_t	server_accept (bthid_server_p srv, int32_t fd);
 static int32_t	server_process(bthid_server_p srv, int32_t fd);
 
+struct bthidbus_new_connection {
+	int ctrl_sock;
+	int intr_sock;
+	uint16_t vendorId;
+	uint16_t productId;
+	uint16_t versionId;
+	void *rdesc;
+	size_t rdesc_len;
+};
+
+#define BTHIDBUS_NEW_CONNECTION _IOW('B', 1, struct bthidbus_new_connection)
+
+struct report_desc {
+	uint32_t size;
+	uint8_t data[1];
+};
+
+static int
+do_kernel_handoff(bthid_session_p s)
+{
+    hid_device_p d = get_hid_device(&s->bdaddr);
+    struct bthidbus_new_connection req = {0};
+
+    req.vendorId  = d->vendor_id;
+    req.productId = d->product_id;
+    req.rdesc       = d->desc->data;
+    req.rdesc_len   = d->desc->size;
+    req.ctrl_sock    = s->ctrl;
+    req.intr_sock    = s->intr;
+
+    int cfd = open("/dev/bthidbus0", O_WRONLY);
+    if (cfd < 0)
+        return (-1);
+
+    int rv = ioctl(cfd, BTHIDBUS_NEW_CONNECTION, &req);
+    syslog(LOG_ERR, "Running ioctl\n");
+
+
+    close(cfd);
+    return (rv);
+}
+
+static void
+session_handoff(bthid_session_p s)
+{
+    if (s->intr != -1) {
+        FD_CLR(s->intr, &s->srv->rfdset);
+        FD_CLR(s->intr, &s->srv->wfdset);
+        s->intr = -1;
+    }
+    if (s->ctrl != -1) {
+        FD_CLR(s->ctrl, &s->srv->rfdset);
+        FD_CLR(s->ctrl, &s->srv->wfdset);
+        s->ctrl = -1;
+    }
+}
+
 /*
  * Initialize server
  */
@@ -215,6 +272,20 @@ server_do(bthid_server_p srv)
 			client_connect(srv, fd);
 		}
 	}
+	bthid_session_p s, s_next;
+
+	LIST_FOREACH_SAFE(s, &srv->sessions, next, s_next) {
+		syslog(LOG_ERR, "STATE = %d CTRL = %d INTR = %d", s->state, s->intr, s->ctrl);
+	    if (s->state == OPEN && s->ctrl != -1 && s->intr != -1) {
+		if (do_kernel_handoff(s) == 0) {
+			syslog(LOG_ERR, "HANDOFF SUCCESS\n");
+		    session_handoff(s);
+		}
+		else {
+			syslog(LOG_ERR, "HANDOFF FAILED\n");
+		}
+	    }
+}
 
 	return (0);
 }

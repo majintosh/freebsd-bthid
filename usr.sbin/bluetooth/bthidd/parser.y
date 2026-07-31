@@ -439,8 +439,8 @@ check_hid_device(hid_device_p d)
 		case hid_input:
 			/* Check if the device may send keystrokes */
 			page = HID_PAGE(hi.usage);
-			if (page == HUP_KEYBOARD)
-				d->keyboard = 1;
+			//if (page == HUP_KEYBOARD)
+				//d->keyboard = 1;
 			if (page == HUP_CONSUMER &&
 			    (hi.flags & (HIO_CONST|HIO_RELATIVE)) == 0)
 				d->has_cons = 1;
