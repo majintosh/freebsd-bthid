@@ -154,7 +154,7 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 				return -1;
 			}
 
-			if (ctrl_file->f_type != DTYPE_SOCKET || ctrl_file->f_type != DTYPE_SOCKET) {
+			if (ctrl_file->f_type != DTYPE_SOCKET || intr_file->f_type != DTYPE_SOCKET) {
 				free(kern_rdesc, M_DEVBUF);
 				fdrop(ctrl_file, td);
 				fdrop(intr_file, td);
