@@ -63,13 +63,15 @@ bthidbus_add_child(device_t dev, u_int order, const char *name, int unit)
 
 static void
 new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket* ctrl_sock, struct socket* intr_sock,
-		struct file* ctrl_file, struct file* intr_file)
+		struct file* ctrl_file, struct file* intr_file, struct thread* td)
 {
 	device_t child;
 	child = BUS_ADD_CHILD(bus, 0, "bthid", DEVICE_UNIT_ANY);
 
 	if (child == NULL) {
 		free(con->rdesc, M_DEVBUF);
+		fdrop(ctrl_file, td);
+		fdrop(intr_file, td);
 		return;
 	}
 	struct bthid_ivars *ivars = device_get_ivars(child);
@@ -163,7 +165,7 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 			intr_sock = intr_file->f_data;
 
 
-			new_connection(sc->dev, con, ctrl_sock, intr_sock, ctrl_file, intr_file);
+			new_connection(sc->dev, con, ctrl_sock, intr_sock, ctrl_file, intr_file, td);
 			return 0;
 	}
 	return -1;
