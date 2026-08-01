@@ -145,7 +145,7 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 			struct socket *ctrl_sock, *intr_sock;
 			struct file *ctrl_file, *intr_file;
 			cap_rights_t rights;
-			cap_rights_init_one(&rights, CAP_IOCTL);
+			cap_rights_init_one(&rights, CAP_SOCK_CLIENT);
 			if (fget(td, con->ctrl_sock, &rights, &ctrl_file) != 0) {
 				free(kern_rdesc, M_DEVBUF);
 				return -1;
