@@ -55,7 +55,7 @@ bthidbus_add_child(device_t dev, u_int order, const char *name, int unit)
 	child = device_add_child_ordered(dev, order, name, unit);
 
 	if (child == NULL)
-		return child;
+		return (child);
 	ivars = malloc(sizeof(struct bthid_ivars), M_DEVBUF, M_WAITOK | M_ZERO);
 	device_set_ivars(child, ivars);
 
@@ -73,7 +73,7 @@ new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket*
 		free(con->rdesc, M_DEVBUF);
 		fdrop(ctrl_file, td);
 		fdrop(intr_file, td);
-		return;
+		return; // Should fix this so that we don't fail silently
 	}
 	struct bthid_ivars *ivars = device_get_ivars(child);
 	ivars->vendor_id = con->vendor_id;
@@ -131,36 +131,40 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 {
 	struct bthidbus_new_connection *con;
 	struct bthidbus_softc *sc = dev->si_drv1;
+	int err;
 	switch (cmd) {
 		case BTHIDBUS_NEW_CONNECTION:
 			con = (struct bthidbus_new_connection *) addr;
-			size_t rdesc_len = con->rdesc_len > RDESC_MAX_LEN ? RDESC_MAX_LEN : con->rdesc_len;
-			uint8_t *kern_rdesc = malloc(rdesc_len, M_DEVBUF, M_WAITOK | M_ZERO);
-			int err = copyin(con->rdesc, kern_rdesc, rdesc_len);
+			if (con->rdesc_len == 0 || con->rdesc_len > RDESC_MAX_LEN)
+				return (EINVAL);
+			uint8_t *kern_rdesc = malloc(con->rdesc_len, M_DEVBUF, M_WAITOK | M_ZERO);
+			err = copyin(con->rdesc, kern_rdesc, con->rdesc_len);
 			if (err != 0) {
 				free(kern_rdesc, M_DEVBUF);
-				return -1;
+				return (err);
 			}
 			con->rdesc = kern_rdesc;
 			struct socket *ctrl_sock, *intr_sock;
 			struct file *ctrl_file, *intr_file;
 			cap_rights_t rights;
 			cap_rights_init_one(&rights, CAP_SOCK_CLIENT);
-			if (fget(td, con->ctrl_sock, &rights, &ctrl_file) != 0) {
+			err = fget(td, con->ctrl_sock, &rights, &ctrl_file);
+			if (err != 0) {
 				free(kern_rdesc, M_DEVBUF);
-				return -1;
+				return (err);
 			}
-			if (fget(td, con->intr_sock, &rights, &intr_file) != 0) {
+			err = fget(td, con->intr_sock, &rights, &intr_file);
+			if (err != 0) {
 				free(kern_rdesc, M_DEVBUF);
 				fdrop(ctrl_file, td);
-				return -1;
+				return (err);
 			}
 
 			if (ctrl_file->f_type != DTYPE_SOCKET || intr_file->f_type != DTYPE_SOCKET) {
 				free(kern_rdesc, M_DEVBUF);
 				fdrop(ctrl_file, td);
 				fdrop(intr_file, td);
-				return -1;
+				return (ENOTSOCK);
 			}
 
 			ctrl_sock = ctrl_file->f_data;
@@ -170,7 +174,7 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 			new_connection(sc->dev, con, ctrl_sock, intr_sock, ctrl_file, intr_file, td);
 			return 0;
 	}
-	return -1;
+	return (ENOTTY);
 }
 static device_method_t bthidbus_methods[] = {
 	DEVMETHOD(device_identify,	bthidbus_identify),
