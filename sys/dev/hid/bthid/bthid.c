@@ -57,8 +57,6 @@ static int
 bthid_detach(device_t dev)
 {
 	struct bthid_softc *sc = device_get_softc(dev);
-	printf("NUMBER OF CTRL FILE REFERENCES: %d\n", sc->ctrl_file->f_count);
-	printf("NUMBER OF INTR FILE REFERENCES: %d\n", sc->intr_file->f_count);
 	socket_close(sc->ctrl, sc->ctrl_file);
 	socket_close(sc->intr, sc->intr_file);
 	free(sc->rdesc.data, M_DEVBUF);
@@ -71,7 +69,7 @@ bthid_attach(device_t dev)
 	struct bthid_ivars *ivar = device_get_ivars(dev);
 	device_t child = device_add_child(dev, "hidbus", DEVICE_UNIT_ANY);
 	if (child == NULL) {
-		printf("Couldn't add hidbus device\n");
+		device_printf(dev, "Couldn't add hidbus device\n");
 		free(ivar->rdesc, M_DEVBUF);
 		return (ENOMEM);
 	}
@@ -150,8 +148,8 @@ bthid_intr_stop(device_t dev, device_t child __unused)
 	SOCK_RECVBUF_LOCK(sc->intr);
 	if (sc->intr->so_rcv.sb_upcall != NULL)
 		soupcall_clear(sc->intr, SO_RCV);
-	taskqueue_drain(taskqueue_swi, &sc->intr_task);
 	SOCK_RECVBUF_UNLOCK(sc->intr);
+	taskqueue_drain(taskqueue_swi, &sc->intr_task);
 	return (0);
 }
 
