@@ -20,6 +20,7 @@
 #include <netgraph/bluetooth/include/ng_btsocket.h>
 
 #include <sys/conf.h>
+#include <sys/malloc.h>
 
 #include "bthid.h"
 #include "bthidbus.h"
@@ -41,8 +42,8 @@ static int
 bthidbus_detach(device_t dev)
 {
 	struct bthidbus_softc *sc = device_get_softc(dev);
-	sc->cdev->si_drv1 = NULL;
 	destroy_dev(sc->cdev);
+	sc->cdev->si_drv1 = NULL;
 	device_delete_children(dev);
 	return (0);
 }
@@ -62,18 +63,15 @@ bthidbus_add_child(device_t dev, u_int order, const char *name, int unit)
 	return (child);
 }
 
-static void
+static int 
 new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket* ctrl_sock, struct socket* intr_sock,
-		struct file* ctrl_file, struct file* intr_file, struct thread* td)
+		struct file* ctrl_file, struct file* intr_file)
 {
 	device_t child;
 	child = BUS_ADD_CHILD(bus, 0, "bthid", DEVICE_UNIT_ANY);
 
 	if (child == NULL) {
-		free(con->rdesc, M_DEVBUF);
-		fdrop(ctrl_file, td);
-		fdrop(intr_file, td);
-		return; // Should fix this so that we don't fail silently
+		return (ENOMEM);
 	}
 	struct bthid_ivars *ivars = device_get_ivars(child);
 	ivars->vendor_id = con->vendor_id;
@@ -87,8 +85,12 @@ new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket*
 	ivars->intr_file = intr_file;
 
 	mtx_lock(&Giant);
-	device_probe_and_attach(child);
+	int error = device_probe_and_attach(child);
 	mtx_unlock(&Giant);
+	if (error!=0) {
+		device_delete_child(bus, child);
+	}
+	return (error);
 }
 
 static d_ioctl_t bthidbus_ioctl;
@@ -109,9 +111,14 @@ bthidbus_attach(device_t dev)
 	mda.mda_devsw = &bthidbus_cdevsw;
 	mda.mda_uid = UID_ROOT;
 	mda.mda_si_drv1 = sc;
+	mda.mda_gid = GID_WHEEL;
+	mda.mda_mode = 0600;
 
 
-	make_dev_s(&mda, &sc->cdev, "bthidbus%d", device_get_unit(dev));
+	int error = make_dev_s(&mda, &sc->cdev, "bthidbus%d", device_get_unit(dev));
+	if (error != 0) {
+		return (error);
+	}
 
 	return (0);
 }
@@ -133,7 +140,7 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 	struct bthidbus_softc *sc = dev->si_drv1;
 	int err;
 	switch (cmd) {
-		case BTHIDBUS_NEW_CONNECTION:
+		case BTHIDBUS_NEW_CONNECTION: {
 			con = (struct bthidbus_new_connection *) addr;
 			if (con->rdesc_len == 0 || con->rdesc_len > RDESC_MAX_LEN)
 				return (EINVAL);
@@ -166,13 +173,18 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 				fdrop(intr_file, td);
 				return (ENOTSOCK);
 			}
+		
 
 			ctrl_sock = ctrl_file->f_data;
 			intr_sock = intr_file->f_data;
-
-
-			new_connection(sc->dev, con, ctrl_sock, intr_sock, ctrl_file, intr_file, td);
-			return 0;
+			err = new_connection(sc->dev, con, ctrl_sock, intr_sock, ctrl_file, intr_file);
+			if (err != 0) {
+				free(kern_rdesc, M_DEVBUF);
+				fdrop(ctrl_file, td);
+				fdrop(intr_file, td);
+			}
+			return (err);
+		}
 	}
 	return (ENOTTY);
 }
@@ -192,14 +204,19 @@ bthidbus_modevent(module_t mod, int type, void *data)
 {
 	int error = 0;
 	switch (type) {
-		case MOD_LOAD:
+		case MOD_LOAD: {
 			break;
-		case MOD_UNLOAD:
-			device_delete_child(device_get_parent(bthidbus), bthidbus);
-			bthidbus = NULL;
+		}
+		case MOD_UNLOAD: {
+			int error = device_delete_child(device_get_parent(bthidbus), bthidbus);
+			if (error == 0) {
+				bthidbus = NULL;
+			}
 			break;
-		default:
+		}
+		default: {
 			break;
+		}
 	}
 	return error;
 }
