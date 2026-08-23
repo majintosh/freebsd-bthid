@@ -59,6 +59,7 @@ static int
 bthid_detach(device_t dev)
 {
 	struct bthid_softc *sc = device_get_softc(dev);
+	device_delete_children(dev);
 	socket_close(sc->ctrl, sc->ctrl_file);
 	socket_close(sc->intr, sc->intr_file);
 	free(sc->rdesc.data, M_DEVBUF);
@@ -134,7 +135,6 @@ bthid_intr_setup(device_t dev, device_t child __unused, hid_intr_t intr,
 	struct bthid_softc *sc = device_get_softc(dev);
 	sc->intr_handler = intr;
 	sc->intr_ctx = context;
-	// Should we just copy the value of rdesc into our softc's rdesc?
 	sc->rdesc.isize = rdesc->isize;
 	TASK_INIT(&sc->intr_task, 0, intr_worker, sc);
 }
