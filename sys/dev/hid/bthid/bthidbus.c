@@ -63,9 +63,9 @@ bthidbus_add_child(device_t dev, u_int order, const char *name, int unit)
 	return (child);
 }
 
-static int 
-new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket* ctrl_sock, struct socket* intr_sock,
-		struct file* ctrl_file, struct file* intr_file)
+static int
+new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket *ctrl_sock,
+		struct socket *intr_sock, struct file *ctrl_file, struct file *intr_file)
 {
 	device_t child;
 	child = BUS_ADD_CHILD(bus, 0, "bthid", DEVICE_UNIT_ANY);
@@ -87,7 +87,7 @@ new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket*
 	mtx_lock(&Giant);
 	int error = device_probe_and_attach(child);
 	mtx_unlock(&Giant);
-	if (error!=0) {
+	if (error != 0) {
 		device_delete_child(bus, child);
 	}
 	return (error);
@@ -134,7 +134,7 @@ bthidbus_identify(driver_t *driver, device_t parent)
 
 
 static int
-bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thread *td) 
+bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thread *td)
 {
 	struct bthidbus_new_connection *con;
 	struct bthidbus_softc *sc = dev->si_drv1;
@@ -173,7 +173,7 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 				fdrop(intr_file, td);
 				return (ENOTSOCK);
 			}
-		
+
 
 			ctrl_sock = ctrl_file->f_data;
 			intr_sock = intr_file->f_data;
@@ -218,7 +218,7 @@ bthidbus_modevent(module_t mod, int type, void *data)
 			break;
 		}
 	}
-	return error;
+	return (error);
 }
 
 static driver_t bthidbus_driver = {
