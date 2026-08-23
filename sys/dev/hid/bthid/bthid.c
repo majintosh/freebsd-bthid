@@ -101,21 +101,19 @@ intr_worker(void* context, int pending)
 	
 	struct uio uio;
 	int flag = MSG_DONTWAIT;
-	uio.uio_resid = sc->rdesc.isize + 1;
 	uio.uio_td = curthread;
 	struct mbuf *m = NULL;
 	int loops = 0;
 	for (; loops<MAX_LOOPS; loops++) {
+		uio.uio_resid = sc->rdesc.isize + 1;
 		soreceive(sc->intr, NULL, &uio, &m, NULL, &flag);
-		if (m!=NULL) {
-			m_adj(m, 1); // Strip the bluetooth header from the packet
-			uint8_t *payload = mtod(m, uint8_t *);
-			sc->intr_handler(sc->intr_ctx, payload, m->m_len);
-		}
-		else
+		if (m==NULL)
 			break;
+		m_adj(m, 1); // Strip the bluetooth header from the packet
+		uint8_t *payload = mtod(m, uint8_t *);
+		sc->intr_handler(sc->intr_ctx, payload, m->m_len);
+		m_freem(m);
 	}
-	m_freem(m);
 	if (loops == MAX_LOOPS) // If we hit the cap, we probably have more packets left to process
 		taskqueue_enqueue(taskqueue_swi, &sc->intr_task);
 }
