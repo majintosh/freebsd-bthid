@@ -26,7 +26,7 @@
 
 struct bthidbus_softc {
 	struct cdev	*cdev;
-	device_t dev;
+	device_t	dev;
 };
 
 static int
@@ -38,7 +38,8 @@ bthidbus_probe(device_t dev)
 static int
 bthidbus_detach(device_t dev)
 {
-	struct bthidbus_softc *sc = device_get_softc(dev);
+	struct bthidbus_softc *sc;
+	sc = device_get_softc(dev);
 	destroy_dev(sc->cdev);
 	device_delete_children(dev);
 	return (0);
@@ -118,7 +119,6 @@ bthidbus_attach(device_t dev)
 	mda.mda_gid = GID_WHEEL;
 	mda.mda_mode = 0600;
 
-
 	error = make_dev_s(&mda, &sc->cdev, "bthidbus%d", device_get_unit(dev));
 	if (error != 0)
 		return (error);
@@ -152,48 +152,55 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 	sc = dev->si_drv1;
 
 	switch (cmd) {
-		case BTHIDBUS_NEW_CONNECTION: {
-			con = (struct bthidbus_new_connection *) addr;
-			if (con->rdesc_len == 0 || con->rdesc_len > RDESC_MAX_LEN)
-				return (EINVAL);
-			kern_rdesc = malloc(con->rdesc_len, M_DEVBUF, M_WAITOK | M_ZERO);
-			err = copyin(con->rdesc, kern_rdesc, con->rdesc_len);
-			if (err != 0) {
-				free(kern_rdesc, M_DEVBUF);
-				return (err);
-			}
-			con->rdesc = kern_rdesc;
-			cap_rights_init_one(&rights, CAP_SOCK_CLIENT);
-			err = fget(td, con->ctrl_sock, &rights, &ctrl_file);
-			if (err != 0) {
-				free(kern_rdesc, M_DEVBUF);
-				return (err);
-			}
-			err = fget(td, con->intr_sock, &rights, &intr_file);
-			if (err != 0) {
-				free(kern_rdesc, M_DEVBUF);
-				fdrop(ctrl_file, td);
-				return (err);
-			}
+	case BTHIDBUS_NEW_CONNECTION: {
 
-			if (ctrl_file->f_type != DTYPE_SOCKET || intr_file->f_type != DTYPE_SOCKET) {
-				free(kern_rdesc, M_DEVBUF);
-				fdrop(ctrl_file, td);
-				fdrop(intr_file, td);
-				return (ENOTSOCK);
-			}
+		con = (struct bthidbus_new_connection *) addr;
+		if (con->rdesc_len == 0 || con->rdesc_len > RDESC_MAX_LEN)
+			return (EINVAL);
 
+		kern_rdesc = malloc(con->rdesc_len, M_DEVBUF, M_WAITOK | M_ZERO);
 
-			ctrl_sock = ctrl_file->f_data;
-			intr_sock = intr_file->f_data;
-			err = new_connection(sc->dev, con, ctrl_sock, intr_sock, ctrl_file, intr_file);
-			if (err != 0) {
-				free(kern_rdesc, M_DEVBUF);
-				fdrop(ctrl_file, td);
-				fdrop(intr_file, td);
-			}
+		err = copyin(con->rdesc, kern_rdesc, con->rdesc_len);
+		if (err != 0) {
+			free(kern_rdesc, M_DEVBUF);
 			return (err);
 		}
+
+		con->rdesc = kern_rdesc;
+		cap_rights_init_one(&rights, CAP_SOCK_CLIENT);
+
+		err = fget(td, con->ctrl_sock, &rights, &ctrl_file);
+		if (err != 0) {
+			free(kern_rdesc, M_DEVBUF);
+			return (err);
+		}
+
+		err = fget(td, con->intr_sock, &rights, &intr_file);
+		if (err != 0) {
+			free(kern_rdesc, M_DEVBUF);
+			fdrop(ctrl_file, td);
+			return (err);
+		}
+
+		if (ctrl_file->f_type != DTYPE_SOCKET || intr_file->f_type != DTYPE_SOCKET) {
+			free(kern_rdesc, M_DEVBUF);
+			fdrop(ctrl_file, td);
+			fdrop(intr_file, td);
+			return (ENOTSOCK);
+		}
+
+
+		ctrl_sock = ctrl_file->f_data;
+		intr_sock = intr_file->f_data;
+
+		err = new_connection(sc->dev, con, ctrl_sock, intr_sock, ctrl_file, intr_file);
+		if (err != 0) {
+			free(kern_rdesc, M_DEVBUF);
+			fdrop(ctrl_file, td);
+			fdrop(intr_file, td);
+		}
+		return (err);
+	}
 	}
 	return (ENOTTY);
 }
@@ -214,18 +221,18 @@ bthidbus_modevent(module_t mod, int type, void *data)
 	int error;
 	error = 0;
 	switch (type) {
-		case MOD_LOAD: {
-			break;
-		}
-		case MOD_UNLOAD: {
-			error = device_delete_child(device_get_parent(bthidbus), bthidbus);
-			if (error == 0)
-				bthidbus = NULL;
-			break;
-		}
-		default: {
-			break;
-		}
+	case MOD_LOAD: {
+		break;
+	}
+	case MOD_UNLOAD: {
+		error = device_delete_child(device_get_parent(bthidbus), bthidbus);
+		if (error == 0)
+			bthidbus = NULL;
+		break;
+	}
+	default: {
+		break;
+	}
 	}
 	return (error);
 }
