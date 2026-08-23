@@ -18,17 +18,17 @@
 #define MAX_LOOPS 64
 
 struct bthid_softc {
-	struct socket*			ctrl;
-	struct socket*			intr;
+	struct socket			*ctrl;
+	struct socket			*intr;
 	struct task			intr_task;
-	hid_intr_t*			intr_handler;
-	void*				intr_ctx;
+	hid_intr_t			*intr_handler;
+	void				*intr_ctx;
 	hid_size_t			input_length;
 	struct hid_device_info		dinfo;
 	struct hid_rdesc_info		rdesc;
 
-	struct file*			ctrl_file;
-	struct file*			intr_file;
+	struct file			*ctrl_file;
+	struct file			*intr_file;
 };
 
 
@@ -42,17 +42,17 @@ bthid_probe(device_t dev)
 
 
 static int
-socket_close(struct socket* sock, struct file* f)
+socket_close(struct socket *sock, struct file *f)
 {
 	if (sock == NULL)
-		return 0;
+		return (0);
 	SOCK_RECVBUF_LOCK(sock);
 	if (sock->so_rcv.sb_upcall != NULL)
 		soupcall_clear(sock, SO_RCV);
 	SOCK_RECVBUF_UNLOCK(sock);
 	// Need to clear taskqueue threads before closing socket
 	fdrop(f, curthread);
-	return 0;
+	return (0);
 }
 
 static int
@@ -63,7 +63,7 @@ bthid_detach(device_t dev)
 	socket_close(sc->ctrl, sc->ctrl_file);
 	socket_close(sc->intr, sc->intr_file);
 	free(sc->rdesc.data, M_DEVBUF);
-	return 0;
+	return (0);
 }
 
 static int
@@ -91,30 +91,31 @@ bthid_attach(device_t dev)
 
 	device_set_ivars(child, &sc->dinfo);
 	bus_attach_children(dev);
-	return 0;
+	return (0);
 }
 
 static void
-intr_worker(void* context, int pending)
+intr_worker(void *context, int pending)
 {
 	struct bthid_softc *sc = context;
-	
+
 	struct uio uio;
 	int flag = MSG_DONTWAIT;
 	uio.uio_td = curthread;
 	struct mbuf *m = NULL;
 	int loops = 0;
-	for (; loops<MAX_LOOPS; loops++) {
+	for (; loops < MAX_LOOPS; loops++) {
 		uio.uio_resid = sc->rdesc.isize + 1;
 		soreceive(sc->intr, NULL, &uio, &m, NULL, &flag);
-		if (m==NULL)
+		if (m == NULL)
 			break;
 		m_adj(m, 1); // Strip the bluetooth header from the packet
 		uint8_t *payload = mtod(m, uint8_t *);
 		sc->intr_handler(sc->intr_ctx, payload, m->m_len);
 		m_freem(m);
 	}
-	if (loops == MAX_LOOPS) // If we hit the cap, we probably have more packets left to process
+	// If we hit the loop cap, we probably have more packets to process
+	if (loops == MAX_LOOPS)
 		taskqueue_enqueue(taskqueue_swi, &sc->intr_task);
 }
 
@@ -123,10 +124,10 @@ intr_upcall(struct socket *s, void *arg, int which)
 {
 	struct task *intr_task = arg;
 	taskqueue_enqueue(taskqueue_swi, intr_task);
-	return SU_OK;
+	return (SU_OK);
 }
 
-static void 
+static void
 bthid_intr_setup(device_t dev, device_t child __unused, hid_intr_t intr,
 		void *context, struct hid_rdesc_info *rdesc)
 {
