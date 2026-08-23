@@ -1,19 +1,19 @@
 #include <sys/param.h>
 #include <sys/bus.h>
-#include <sys/module.h>
+#include <sys/file.h>
 #include <sys/kernel.h>
-#include <sys/socketvar.h>
-#include <sys/mutex.h>
-#include <sys/uio.h>
-#include <dev/hid/hid.h>
-#include <sys/taskqueue.h>
-
 #include <sys/mbuf.h>
+#include <sys/module.h>
+#include <sys/mutex.h>
+#include <sys/socketvar.h>
+#include <sys/taskqueue.h>
+#include <sys/uio.h>
+
 #include <dev/evdev/input.h>
+#include <dev/hid/hid.h>
 
 #include "bthid.h"
 #include "hid_if.h"
-#include <sys/file.h>
 
 #define MAX_LOOPS 64
 

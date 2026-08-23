@@ -1,26 +1,23 @@
 #include <sys/param.h>
-#include <sys/bus.h>
-#include <sys/module.h>
-#include <sys/kernel.h>
-#include <sys/file.h>
-
-#include <sys/capsicum.h>
-#include <sys/caprights.h>
-
+#include <sys/systm.h>
 #include <sys/bitstring.h>
+#include <sys/bus.h>
+#include <sys/caprights.h>
+#include <sys/capsicum.h>
+#include <sys/conf.h>
+#include <sys/file.h>
+#include <sys/kernel.h>
+#include <sys/malloc.h>
+#include <sys/module.h>
+#include <sys/mutex.h>
+#include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
-#include <sys/proc.h>
-#include <sys/systm.h>
-#include <sys/mutex.h>
 
 #include <netgraph/bluetooth/include/ng_bluetooth.h>
 #include <netgraph/bluetooth/include/ng_hci.h>
 #include <netgraph/bluetooth/include/ng_l2cap.h>
 #include <netgraph/bluetooth/include/ng_btsocket.h>
-
-#include <sys/conf.h>
-#include <sys/malloc.h>
 
 #include "bthid.h"
 #include "bthidbus.h"
