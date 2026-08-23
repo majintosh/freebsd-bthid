@@ -31,15 +31,11 @@ struct bthid_softc {
 	struct file			*intr_file;
 };
 
-
 static int
 bthid_probe(device_t dev)
 {
 	return (BUS_PROBE_DEFAULT);
 }
-
-
-
 
 static int
 socket_close(struct socket *sock, struct file *f)
@@ -50,7 +46,6 @@ socket_close(struct socket *sock, struct file *f)
 	if (sock->so_rcv.sb_upcall != NULL)
 		soupcall_clear(sock, SO_RCV);
 	SOCK_RECVBUF_UNLOCK(sock);
-	// Need to clear taskqueue threads before closing socket
 	fdrop(f, curthread);
 	return (0);
 }
@@ -62,6 +57,8 @@ bthid_detach(device_t dev)
 
 	sc = device_get_softc(dev);
 	device_delete_children(dev);
+
+	taskqueue_drain(taskqueue_swi, &sc->intr_task);
 	socket_close(sc->ctrl, sc->ctrl_file);
 	socket_close(sc->intr, sc->intr_file);
 	free(sc->rdesc.data, M_DEVBUF);
@@ -83,7 +80,6 @@ bthid_attach(device_t dev)
 		return (ENOMEM);
 	}
 	sc = device_get_softc(dev);
-	bzero(sc, sizeof(struct bthid_softc));
 	sc->rdesc.data = ivar->rdesc;
 	sc->ctrl = ivar->ctrl_sock;
 	sc->intr = ivar->intr_sock;
@@ -107,7 +103,8 @@ intr_worker(void *context, int pending)
 	struct mbuf *m;
 	struct uio uio;
 	uint8_t *payload;
-	int flag, loops;
+	int flag;
+	int loops;
 
 	sc = context;
 	flag = MSG_DONTWAIT;
@@ -157,7 +154,8 @@ bthid_intr_setup(device_t dev, device_t child __unused, hid_intr_t intr,
 static int
 bthid_intr_start(device_t dev, device_t child __unused)
 {
-	struct bthid_softc *sc = device_get_softc(dev);
+	struct bthid_softc *sc;
+	sc = device_get_softc(dev);
 	SOCK_RECVBUF_LOCK(sc->intr);
 	soupcall_set(sc->intr, SO_RCV, intr_upcall, &sc->intr_task);
 	SOCK_RECVBUF_UNLOCK(sc->intr);

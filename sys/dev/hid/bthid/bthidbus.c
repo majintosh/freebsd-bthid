@@ -26,6 +26,7 @@
 #include "bthidbus.h"
 
 #define RDESC_MAX_LEN 4096
+
 struct bthidbus_softc {
 	struct cdev	*cdev;
 	device_t dev;
@@ -37,13 +38,11 @@ bthidbus_probe(device_t dev)
 	return (0);
 }
 
-
 static int
 bthidbus_detach(device_t dev)
 {
 	struct bthidbus_softc *sc = device_get_softc(dev);
 	destroy_dev(sc->cdev);
-	sc->cdev->si_drv1 = NULL;
 	device_delete_children(dev);
 	return (0);
 }
@@ -53,10 +52,12 @@ bthidbus_add_child(device_t dev, u_int order, const char *name, int unit)
 {
 	struct bthid_ivars *ivars;
 	device_t child;
+
 	child = device_add_child_ordered(dev, order, name, unit);
 
 	if (child == NULL)
 		return (child);
+
 	ivars = malloc(sizeof(struct bthid_ivars), M_DEVBUF, M_WAITOK | M_ZERO);
 	device_set_ivars(child, ivars);
 
@@ -67,13 +68,16 @@ static int
 new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket *ctrl_sock,
 		struct socket *intr_sock, struct file *ctrl_file, struct file *intr_file)
 {
+	struct bthid_ivars *ivars;
 	device_t child;
+	int error;
+
 	child = BUS_ADD_CHILD(bus, 0, "bthid", DEVICE_UNIT_ANY);
 
 	if (child == NULL)
 		return (ENOMEM);
 
-	struct bthid_ivars *ivars = device_get_ivars(child);
+	ivars = device_get_ivars(child);
 	ivars->vendor_id = con->vendor_id;
 	ivars->product_id = con->product_id;
 	ivars->version_id = con->version_id;
@@ -85,7 +89,7 @@ new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket 
 	ivars->intr_file = intr_file;
 
 	mtx_lock(&Giant);
-	int error = device_probe_and_attach(child);
+	error = device_probe_and_attach(child);
 	mtx_unlock(&Giant);
 	if (error != 0)
 		device_delete_child(bus, child);
@@ -104,9 +108,12 @@ static struct cdevsw bthidbus_cdevsw = {
 static int
 bthidbus_attach(device_t dev)
 {
-	struct bthidbus_softc *sc = device_get_softc(dev);
-	sc->dev = dev;
+	struct bthidbus_softc *sc;
 	struct make_dev_args mda;
+	int error;
+
+	sc = device_get_softc(dev);
+	sc->dev = dev;
 	make_dev_args_init(&mda);
 	mda.mda_devsw = &bthidbus_cdevsw;
 	mda.mda_uid = UID_ROOT;
@@ -115,7 +122,7 @@ bthidbus_attach(device_t dev)
 	mda.mda_mode = 0600;
 
 
-	int error = make_dev_s(&mda, &sc->cdev, "bthidbus%d", device_get_unit(dev));
+	error = make_dev_s(&mda, &sc->cdev, "bthidbus%d", device_get_unit(dev));
 	if (error != 0)
 		return (error);
 
@@ -136,23 +143,29 @@ static int
 bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thread *td)
 {
 	struct bthidbus_new_connection *con;
-	struct bthidbus_softc *sc = dev->si_drv1;
+	struct bthidbus_softc *sc;
+	struct socket *ctrl_sock;
+	struct socket *intr_sock;
+	struct file *ctrl_file;
+	struct file *intr_file;
+	uint8_t *kern_rdesc;
+	cap_rights_t rights;
 	int err;
+
+	sc = dev->si_drv1;
+
 	switch (cmd) {
 		case BTHIDBUS_NEW_CONNECTION: {
 			con = (struct bthidbus_new_connection *) addr;
 			if (con->rdesc_len == 0 || con->rdesc_len > RDESC_MAX_LEN)
 				return (EINVAL);
-			uint8_t *kern_rdesc = malloc(con->rdesc_len, M_DEVBUF, M_WAITOK | M_ZERO);
+			kern_rdesc = malloc(con->rdesc_len, M_DEVBUF, M_WAITOK | M_ZERO);
 			err = copyin(con->rdesc, kern_rdesc, con->rdesc_len);
 			if (err != 0) {
 				free(kern_rdesc, M_DEVBUF);
 				return (err);
 			}
 			con->rdesc = kern_rdesc;
-			struct socket *ctrl_sock, *intr_sock;
-			struct file *ctrl_file, *intr_file;
-			cap_rights_t rights;
 			cap_rights_init_one(&rights, CAP_SOCK_CLIENT);
 			err = fget(td, con->ctrl_sock, &rights, &ctrl_file);
 			if (err != 0) {
