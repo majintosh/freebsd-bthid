@@ -70,9 +70,9 @@ new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket 
 	device_t child;
 	child = BUS_ADD_CHILD(bus, 0, "bthid", DEVICE_UNIT_ANY);
 
-	if (child == NULL) {
+	if (child == NULL)
 		return (ENOMEM);
-	}
+
 	struct bthid_ivars *ivars = device_get_ivars(child);
 	ivars->vendor_id = con->vendor_id;
 	ivars->product_id = con->product_id;
@@ -87,9 +87,9 @@ new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket 
 	mtx_lock(&Giant);
 	int error = device_probe_and_attach(child);
 	mtx_unlock(&Giant);
-	if (error != 0) {
+	if (error != 0)
 		device_delete_child(bus, child);
-	}
+
 	return (error);
 }
 
@@ -116,9 +116,8 @@ bthidbus_attach(device_t dev)
 
 
 	int error = make_dev_s(&mda, &sc->cdev, "bthidbus%d", device_get_unit(dev));
-	if (error != 0) {
+	if (error != 0)
 		return (error);
-	}
 
 	return (0);
 }
@@ -202,16 +201,16 @@ static device_method_t bthidbus_methods[] = {
 static int
 bthidbus_modevent(module_t mod, int type, void *data)
 {
-	int error = 0;
+	int error;
+	error = 0;
 	switch (type) {
 		case MOD_LOAD: {
 			break;
 		}
 		case MOD_UNLOAD: {
-			int error = device_delete_child(device_get_parent(bthidbus), bthidbus);
-			if (error == 0) {
+			error = device_delete_child(device_get_parent(bthidbus), bthidbus);
+			if (error == 0)
 				bthidbus = NULL;
-			}
 			break;
 		}
 		default: {

@@ -58,7 +58,9 @@ socket_close(struct socket *sock, struct file *f)
 static int
 bthid_detach(device_t dev)
 {
-	struct bthid_softc *sc = device_get_softc(dev);
+	struct bthid_softc *sc;
+
+	sc = device_get_softc(dev);
 	device_delete_children(dev);
 	socket_close(sc->ctrl, sc->ctrl_file);
 	socket_close(sc->intr, sc->intr_file);
@@ -69,14 +71,18 @@ bthid_detach(device_t dev)
 static int
 bthid_attach(device_t dev)
 {
-	struct bthid_ivars *ivar = device_get_ivars(dev);
-	device_t child = device_add_child(dev, "hidbus", DEVICE_UNIT_ANY);
+	struct bthid_softc *sc;
+	struct bthid_ivars *ivar;
+	device_t child;
+
+	ivar = device_get_ivars(dev);
+	child = device_add_child(dev, "hidbus", DEVICE_UNIT_ANY);
 	if (child == NULL) {
 		device_printf(dev, "Couldn't add hidbus device\n");
 		free(ivar->rdesc, M_DEVBUF);
 		return (ENOMEM);
 	}
-	struct bthid_softc *sc = device_get_softc(dev);
+	sc = device_get_softc(dev);
 	bzero(sc, sizeof(struct bthid_softc));
 	sc->rdesc.data = ivar->rdesc;
 	sc->ctrl = ivar->ctrl_sock;
@@ -97,20 +103,26 @@ bthid_attach(device_t dev)
 static void
 intr_worker(void *context, int pending)
 {
-	struct bthid_softc *sc = context;
-
+	struct bthid_softc *sc;
+	struct mbuf *m;
 	struct uio uio;
-	int flag = MSG_DONTWAIT;
+	uint8_t *payload;
+	int flag, loops;
+
+	sc = context;
+	flag = MSG_DONTWAIT;
 	uio.uio_td = curthread;
-	struct mbuf *m = NULL;
-	int loops = 0;
-	for (; loops < MAX_LOOPS; loops++) {
+
+	for (loops = 0; loops < MAX_LOOPS; loops++) {
+		m = NULL;
 		uio.uio_resid = sc->rdesc.isize + 1;
 		soreceive(sc->intr, NULL, &uio, &m, NULL, &flag);
 		if (m == NULL)
 			break;
-		m_adj(m, 1); // Strip the bluetooth header from the packet
-		uint8_t *payload = mtod(m, uint8_t *);
+
+		/* Strip Bluetooth header from packet */
+		m_adj(m, 1);
+		payload = mtod(m, uint8_t *);
 		sc->intr_handler(sc->intr_ctx, payload, m->m_len);
 		m_freem(m);
 	}
@@ -122,7 +134,9 @@ intr_worker(void *context, int pending)
 static int
 intr_upcall(struct socket *s, void *arg, int which)
 {
-	struct task *intr_task = arg;
+	struct task *intr_task;
+
+	intr_task = arg;
 	taskqueue_enqueue(taskqueue_swi, intr_task);
 	return (SU_OK);
 }
@@ -131,7 +145,9 @@ static void
 bthid_intr_setup(device_t dev, device_t child __unused, hid_intr_t intr,
 		void *context, struct hid_rdesc_info *rdesc)
 {
-	struct bthid_softc *sc = device_get_softc(dev);
+	struct bthid_softc *sc;
+
+	sc = device_get_softc(dev);
 	sc->intr_handler = intr;
 	sc->intr_ctx = context;
 	sc->rdesc.isize = rdesc->isize;
@@ -152,7 +168,11 @@ bthid_intr_start(device_t dev, device_t child __unused)
 static int
 bthid_intr_stop(device_t dev, device_t child __unused)
 {
-	struct bthid_softc *sc = device_get_softc(dev);
+	struct bthid_softc *sc;
+
+	sc = device_get_softc(dev);
+	if (sc->intr == NULL)
+		return (ENXIO);
 	SOCK_RECVBUF_LOCK(sc->intr);
 	if (sc->intr->so_rcv.sb_upcall != NULL)
 		soupcall_clear(sc->intr, SO_RCV);
@@ -165,7 +185,9 @@ static int
 bthid_get_rdesc(device_t dev, device_t child __unused, void *buf,
 		hid_size_t len)
 {
-	struct bthid_softc *sc = device_get_softc(dev);
+	struct bthid_softc *sc;
+
+	sc = device_get_softc(dev);
 	memcpy(buf, sc->rdesc.data, len);
 	return (0);
 }
