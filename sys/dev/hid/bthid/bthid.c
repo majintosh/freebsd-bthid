@@ -57,7 +57,6 @@ bthid_detach(device_t dev)
 
 	sc = device_get_softc(dev);
 	device_delete_children(dev);
-
 	taskqueue_drain(taskqueue_swi, &sc->intr_task);
 	socket_close(sc->ctrl, sc->ctrl_file);
 	socket_close(sc->intr, sc->intr_file);
@@ -123,7 +122,7 @@ intr_worker(void *context, int pending)
 		sc->intr_handler(sc->intr_ctx, payload, m->m_len);
 		m_freem(m);
 	}
-	// If we hit the loop cap, we probably have more packets to process
+	/* If we hit the loop cap, we probably have more packets to process */
 	if (loops == MAX_LOOPS)
 		taskqueue_enqueue(taskqueue_swi, &sc->intr_task);
 }
@@ -186,11 +185,12 @@ bthid_get_rdesc(device_t dev, device_t child __unused, void *buf,
 	struct bthid_softc *sc;
 
 	sc = device_get_softc(dev);
+	if (sc->rdesc.data == NULL)
+		return (ENXIO);
+
 	memcpy(buf, sc->rdesc.data, len);
 	return (0);
 }
-
-
 
 static device_method_t bthid_methods[] = {
 	DEVMETHOD(device_probe,		bthid_probe),

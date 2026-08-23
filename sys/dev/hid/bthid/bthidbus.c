@@ -39,6 +39,7 @@ static int
 bthidbus_detach(device_t dev)
 {
 	struct bthidbus_softc *sc;
+
 	sc = device_get_softc(dev);
 	destroy_dev(sc->cdev);
 	device_delete_children(dev);
@@ -135,7 +136,6 @@ bthidbus_identify(driver_t *driver, device_t parent)
 		bthidbus = BUS_ADD_CHILD(parent, 0, "bthidbus", DEVICE_UNIT_ANY);
 }
 
-
 static int
 bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thread *td)
 {
@@ -153,7 +153,6 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 
 	switch (cmd) {
 	case BTHIDBUS_NEW_CONNECTION: {
-
 		con = (struct bthidbus_new_connection *) addr;
 		if (con->rdesc_len == 0 || con->rdesc_len > RDESC_MAX_LEN)
 			return (EINVAL);
@@ -188,7 +187,6 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 			fdrop(intr_file, td);
 			return (ENOTSOCK);
 		}
-
 
 		ctrl_sock = ctrl_file->f_data;
 		intr_sock = intr_file->f_data;
