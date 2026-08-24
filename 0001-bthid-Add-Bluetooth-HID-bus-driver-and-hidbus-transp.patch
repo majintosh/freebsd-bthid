@@ -1,0 +1,603 @@
+From afd8a247e769893b2ac97a15f41af71e6e6ab4a7 Mon Sep 17 00:00:00 2001
+From: Majed Alkhaleefah <majed@freebsd.org>
+Date: Mon, 24 Aug 2026 19:24:19 +0300
+Subject: [PATCH] bthid: Add Bluetooth HID bus driver and hidbus transport
+ driver
+
+Add a new kernel transport driver (bthid) and a bus driver (bthidbus)
+to interface Bluetooth HID devices directly with the hid subsystem.
+
+bthidbus exposes a character device interface to allow userland processes
+to pass established sockets and device info to the kernel via ioctl.
+bthid attaches to bthidbus as a child device, routing incoming HID reports
+from the interrupt socket into hidbus.
+
+Connection establishment (pairing, SDP querying) is handled entirely in
+userland; this driver only takes ownership of already-connected sockets.
+---
+ sys/dev/hid/bthid/bthid.c         | 216 +++++++++++++++++++++++++
+ sys/dev/hid/bthid/bthid.h         |  20 +++
+ sys/dev/hid/bthid/bthidbus.c      | 259 ++++++++++++++++++++++++++++++
+ sys/dev/hid/bthid/bthidbus.h      |  20 +++
+ sys/modules/hid/bthid/Makefile    |   9 ++
+ sys/modules/hid/bthidbus/Makefile |   9 ++
+ 6 files changed, 533 insertions(+)
+ create mode 100644 sys/dev/hid/bthid/bthid.c
+ create mode 100644 sys/dev/hid/bthid/bthid.h
+ create mode 100644 sys/dev/hid/bthid/bthidbus.c
+ create mode 100644 sys/dev/hid/bthid/bthidbus.h
+ create mode 100644 sys/modules/hid/bthid/Makefile
+ create mode 100644 sys/modules/hid/bthidbus/Makefile
+
+diff --git a/sys/dev/hid/bthid/bthid.c b/sys/dev/hid/bthid/bthid.c
+new file mode 100644
+index 00000000000..d26ad17e4f4
+--- /dev/null
++++ b/sys/dev/hid/bthid/bthid.c
+@@ -0,0 +1,216 @@
++#include <sys/param.h>
++#include <sys/bus.h>
++#include <sys/file.h>
++#include <sys/kernel.h>
++#include <sys/mbuf.h>
++#include <sys/module.h>
++#include <sys/mutex.h>
++#include <sys/socketvar.h>
++#include <sys/taskqueue.h>
++#include <sys/uio.h>
++
++#include <dev/evdev/input.h>
++#include <dev/hid/hid.h>
++
++#include "bthid.h"
++#include "hid_if.h"
++
++#define MAX_LOOPS 64
++
++struct bthid_softc {
++	struct socket			*ctrl;
++	struct socket			*intr;
++	struct task			intr_task;
++	hid_intr_t			*intr_handler;
++	void				*intr_ctx;
++	hid_size_t			input_length;
++	struct hid_device_info		dinfo;
++	struct hid_rdesc_info		rdesc;
++
++	struct file			*ctrl_file;
++	struct file			*intr_file;
++};
++
++static int
++bthid_probe(device_t dev)
++{
++	return (BUS_PROBE_DEFAULT);
++}
++
++static int
++socket_close(struct socket *sock, struct file *f)
++{
++	if (sock == NULL)
++		return (0);
++	SOCK_RECVBUF_LOCK(sock);
++	if (sock->so_rcv.sb_upcall != NULL)
++		soupcall_clear(sock, SO_RCV);
++	SOCK_RECVBUF_UNLOCK(sock);
++	fdrop(f, curthread);
++	return (0);
++}
++
++static int
++bthid_detach(device_t dev)
++{
++	struct bthid_softc *sc;
++
++	sc = device_get_softc(dev);
++	device_delete_children(dev);
++	taskqueue_drain(taskqueue_swi, &sc->intr_task);
++	socket_close(sc->ctrl, sc->ctrl_file);
++	socket_close(sc->intr, sc->intr_file);
++	return (0);
++}
++
++static int
++bthid_attach(device_t dev)
++{
++	struct bthid_softc *sc;
++	struct bthid_ivars *ivar;
++	device_t child;
++
++	ivar = device_get_ivars(dev);
++	child = device_add_child(dev, "hidbus", DEVICE_UNIT_ANY);
++	if (child == NULL) {
++		device_printf(dev, "Couldn't add hidbus device\n");
++		return (ENOMEM);
++	}
++	sc = device_get_softc(dev);
++	sc->rdesc.data = ivar->rdesc;
++	sc->ctrl = ivar->ctrl_sock;
++	sc->intr = ivar->intr_sock;
++	sc->ctrl_file = ivar->ctrl_file;
++	sc->intr_file = ivar->intr_file;
++	sc->dinfo.idBus = BUS_BLUETOOTH;
++	sc->dinfo.idVendor = ivar->vendor_id;
++	sc->dinfo.idProduct = ivar->product_id;
++	sc->dinfo.idVersion = ivar->version_id;
++	sc->dinfo.rdescsize = ivar->rdesc_len;
++
++	device_set_ivars(child, &sc->dinfo);
++	bus_attach_children(dev);
++	return (0);
++}
++
++static void
++intr_worker(void *context, int pending)
++{
++	struct bthid_softc *sc;
++	struct mbuf *m;
++	struct uio uio;
++	uint8_t *payload;
++	int flag;
++	int loops;
++
++	sc = context;
++	flag = MSG_DONTWAIT;
++	uio.uio_td = curthread;
++
++	for (loops = 0; loops < MAX_LOOPS; loops++) {
++		m = NULL;
++		uio.uio_resid = sc->rdesc.isize + 1;
++		soreceive(sc->intr, NULL, &uio, &m, NULL, &flag);
++		if (m == NULL)
++			break;
++
++		/* Strip Bluetooth header from packet */
++		m_adj(m, 1);
++		payload = mtod(m, uint8_t *);
++		sc->intr_handler(sc->intr_ctx, payload, m->m_len);
++		m_freem(m);
++	}
++	/* If we hit the loop cap, we probably have more packets to process */
++	if (loops == MAX_LOOPS)
++		taskqueue_enqueue(taskqueue_swi, &sc->intr_task);
++}
++
++static int
++intr_upcall(struct socket *s, void *arg, int which)
++{
++	struct task *intr_task;
++
++	intr_task = arg;
++	taskqueue_enqueue(taskqueue_swi, intr_task);
++	return (SU_OK);
++}
++
++static void
++bthid_intr_setup(device_t dev, device_t child __unused, hid_intr_t intr,
++		void *context, struct hid_rdesc_info *rdesc)
++{
++	struct bthid_softc *sc;
++
++	sc = device_get_softc(dev);
++	sc->intr_handler = intr;
++	sc->intr_ctx = context;
++	sc->rdesc.isize = rdesc->isize;
++	TASK_INIT(&sc->intr_task, 0, intr_worker, sc);
++}
++
++static int
++bthid_intr_start(device_t dev, device_t child __unused)
++{
++	struct bthid_softc *sc;
++
++	sc = device_get_softc(dev);
++	SOCK_RECVBUF_LOCK(sc->intr);
++	soupcall_set(sc->intr, SO_RCV, intr_upcall, &sc->intr_task);
++	SOCK_RECVBUF_UNLOCK(sc->intr);
++
++	return (0);
++}
++
++static int
++bthid_intr_stop(device_t dev, device_t child __unused)
++{
++	struct bthid_softc *sc;
++
++	sc = device_get_softc(dev);
++	if (sc->intr == NULL)
++		return (ENXIO);
++	SOCK_RECVBUF_LOCK(sc->intr);
++	if (sc->intr->so_rcv.sb_upcall != NULL)
++		soupcall_clear(sc->intr, SO_RCV);
++	SOCK_RECVBUF_UNLOCK(sc->intr);
++	taskqueue_drain(taskqueue_swi, &sc->intr_task);
++	return (0);
++}
++
++static int
++bthid_get_rdesc(device_t dev, device_t child __unused, void *buf,
++		hid_size_t len)
++{
++	struct bthid_softc *sc;
++
++	sc = device_get_softc(dev);
++	if (sc->rdesc.data == NULL)
++		return (ENXIO);
++
++	memcpy(buf, sc->rdesc.data, len);
++	return (0);
++}
++
++static device_method_t bthid_methods[] = {
++	DEVMETHOD(device_probe,		bthid_probe),
++	DEVMETHOD(device_attach,	bthid_attach),
++	DEVMETHOD(device_detach,	bthid_detach),
++
++	DEVMETHOD(hid_intr_setup,	bthid_intr_setup),
++	DEVMETHOD(hid_intr_start,	bthid_intr_start),
++	DEVMETHOD(hid_intr_stop,	bthid_intr_stop),
++	DEVMETHOD(hid_get_rdesc,	bthid_get_rdesc),
++
++	DEVMETHOD_END
++};
++
++static driver_t bthid_driver = {
++	"bthid",
++	bthid_methods,
++	sizeof(struct bthid_softc)
++};
++
++DRIVER_MODULE(bthid, bthidbus, bthid_driver, NULL, NULL);
++MODULE_VERSION(bthid, 1);
++extern driver_t hidbus_driver;
++DRIVER_MODULE(hidbus, bthid, hidbus_driver, 0, 0);
+diff --git a/sys/dev/hid/bthid/bthid.h b/sys/dev/hid/bthid/bthid.h
+new file mode 100644
+index 00000000000..39e3f35ea24
+--- /dev/null
++++ b/sys/dev/hid/bthid/bthid.h
+@@ -0,0 +1,20 @@
++#ifndef _BTHID_H_
++#define _BTHID_H_
++
++#include <sys/socket.h>
++#include <sys/types.h>
++#include <sys/file.h>
++
++struct bthid_ivars {
++	struct socket	*ctrl_sock;
++	struct socket	*intr_sock;
++	struct file	*ctrl_file;
++	struct file	*intr_file;
++	uint16_t	vendor_id;
++	uint16_t	product_id;
++	uint16_t	version_id;
++	void		*rdesc;
++	size_t		rdesc_len;
++};
++
++#endif /* !_BTHID_H_ */
+diff --git a/sys/dev/hid/bthid/bthidbus.c b/sys/dev/hid/bthid/bthidbus.c
+new file mode 100644
+index 00000000000..5e4c93deab5
+--- /dev/null
++++ b/sys/dev/hid/bthid/bthidbus.c
+@@ -0,0 +1,259 @@
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/bitstring.h>
++#include <sys/bus.h>
++#include <sys/caprights.h>
++#include <sys/capsicum.h>
++#include <sys/conf.h>
++#include <sys/file.h>
++#include <sys/kernel.h>
++#include <sys/malloc.h>
++#include <sys/module.h>
++#include <sys/mutex.h>
++#include <sys/proc.h>
++#include <sys/socket.h>
++#include <sys/socketvar.h>
++
++#include <netgraph/bluetooth/include/ng_bluetooth.h>
++#include <netgraph/bluetooth/include/ng_hci.h>
++#include <netgraph/bluetooth/include/ng_l2cap.h>
++#include <netgraph/bluetooth/include/ng_btsocket.h>
++
++#include "bthid.h"
++#include "bthidbus.h"
++
++#define RDESC_MAX_LEN 4096
++
++struct bthidbus_softc {
++	struct cdev	*cdev;
++	device_t	dev;
++};
++
++static int
++bthidbus_probe(device_t dev)
++{
++	return (0);
++}
++
++static int
++bthidbus_detach(device_t dev)
++{
++	struct bthidbus_softc *sc;
++
++	sc = device_get_softc(dev);
++	destroy_dev(sc->cdev);
++	device_delete_children(dev);
++	return (0);
++}
++
++static device_t
++bthidbus_add_child(device_t dev, u_int order, const char *name, int unit)
++{
++	struct bthid_ivars *ivars;
++	device_t child;
++
++	child = device_add_child_ordered(dev, order, name, unit);
++
++	if (child == NULL)
++		return (child);
++
++	ivars = malloc(sizeof(struct bthid_ivars), M_DEVBUF, M_WAITOK | M_ZERO);
++	device_set_ivars(child, ivars);
++
++	return (child);
++}
++
++static int
++new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket *ctrl_sock,
++		struct socket *intr_sock, struct file *ctrl_file, struct file *intr_file)
++{
++	struct bthid_ivars *ivars;
++	device_t child;
++	int error;
++
++	child = BUS_ADD_CHILD(bus, 0, "bthid", DEVICE_UNIT_ANY);
++
++	if (child == NULL)
++		return (ENOMEM);
++
++	ivars = device_get_ivars(child);
++	ivars->vendor_id = con->vendor_id;
++	ivars->product_id = con->product_id;
++	ivars->version_id = con->version_id;
++	ivars->rdesc = con->rdesc;
++	ivars->rdesc_len = con->rdesc_len;
++	ivars->ctrl_sock = ctrl_sock;
++	ivars->intr_sock = intr_sock;
++	ivars->ctrl_file = ctrl_file;
++	ivars->intr_file = intr_file;
++
++	mtx_lock(&Giant);
++	error = device_probe_and_attach(child);
++	if (error != 0)
++		device_delete_child(bus, child);
++	mtx_unlock(&Giant);
++
++	return (error);
++}
++
++static d_ioctl_t bthidbus_ioctl;
++
++static struct cdevsw bthidbus_cdevsw = {
++	.d_version =	D_VERSION,
++	.d_ioctl =	bthidbus_ioctl,
++	.d_name =	"bthidbus",
++};
++
++static int
++bthidbus_attach(device_t dev)
++{
++	struct bthidbus_softc *sc;
++	struct make_dev_args mda;
++	int error;
++
++	sc = device_get_softc(dev);
++	sc->dev = dev;
++	make_dev_args_init(&mda);
++	mda.mda_devsw = &bthidbus_cdevsw;
++	mda.mda_uid = UID_ROOT;
++	mda.mda_si_drv1 = sc;
++	mda.mda_gid = GID_WHEEL;
++	mda.mda_mode = 0600;
++
++	error = make_dev_s(&mda, &sc->cdev, "bthidbus%d", device_get_unit(dev));
++	if (error != 0)
++		return (error);
++
++	return (0);
++}
++
++static device_t bthidbus;
++
++static void
++bthidbus_identify(driver_t *driver, device_t parent)
++{
++	if (bthidbus == NULL)
++		bthidbus = BUS_ADD_CHILD(parent, 0, "bthidbus", DEVICE_UNIT_ANY);
++}
++
++static int
++bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thread *td)
++{
++	struct bthidbus_new_connection *con;
++	struct bthidbus_softc *sc;
++	struct socket *ctrl_sock;
++	struct socket *intr_sock;
++	struct file *ctrl_file;
++	struct file *intr_file;
++	uint8_t *kern_rdesc;
++	cap_rights_t rights;
++	int err;
++
++	sc = dev->si_drv1;
++
++	switch (cmd) {
++	case BTHIDBUS_NEW_CONNECTION: {
++		con = (struct bthidbus_new_connection *) addr;
++		if (con->rdesc_len == 0 || con->rdesc_len > RDESC_MAX_LEN)
++			return (EINVAL);
++
++		kern_rdesc = malloc(con->rdesc_len, M_DEVBUF, M_WAITOK | M_ZERO);
++
++		err = copyin(con->rdesc, kern_rdesc, con->rdesc_len);
++		if (err != 0) {
++			free(kern_rdesc, M_DEVBUF);
++			return (err);
++		}
++
++		/* Shouldn't overwrite the ioctl struct's rdsec field */
++		con->rdesc = kern_rdesc;
++		cap_rights_init_one(&rights, CAP_SOCK_CLIENT);
++
++		err = fget(td, con->ctrl_sock, &rights, &ctrl_file);
++		if (err != 0) {
++			free(kern_rdesc, M_DEVBUF);
++			return (err);
++		}
++
++		err = fget(td, con->intr_sock, &rights, &intr_file);
++		if (err != 0) {
++			free(kern_rdesc, M_DEVBUF);
++			fdrop(ctrl_file, td);
++			return (err);
++		}
++
++		if (ctrl_file->f_type != DTYPE_SOCKET || intr_file->f_type != DTYPE_SOCKET) {
++			free(kern_rdesc, M_DEVBUF);
++			fdrop(ctrl_file, td);
++			fdrop(intr_file, td);
++			return (ENOTSOCK);
++		}
++
++		ctrl_sock = ctrl_file->f_data;
++		intr_sock = intr_file->f_data;
++
++		err = new_connection(sc->dev, con, ctrl_sock, intr_sock, ctrl_file, intr_file);
++		if (err != 0) {
++			free(kern_rdesc, M_DEVBUF);
++			fdrop(ctrl_file, td);
++			fdrop(intr_file, td);
++		}
++		return (err);
++	}
++	}
++	return (ENOTTY);
++}
++
++static void
++bthidbus_child_deleted(device_t bus, device_t child)
++{
++	struct bthid_ivars *ivars;
++
++	ivars = device_get_ivars(child);
++	free(ivars->rdesc, M_DEVBUF);
++	free(ivars, M_DEVBUF);
++	device_set_ivars(child, NULL);
++}
++
++static device_method_t bthidbus_methods[] = {
++	DEVMETHOD(device_identify,	bthidbus_identify),
++	DEVMETHOD(device_probe,		bthidbus_probe),
++	DEVMETHOD(device_attach,	bthidbus_attach),
++	DEVMETHOD(device_detach,	bthidbus_detach),
++
++	/* BUS METHODS */
++	DEVMETHOD(bus_add_child,	bthidbus_add_child),
++	DEVMETHOD(bus_child_deleted,	bthidbus_child_deleted),
++	DEVMETHOD_END
++};
++
++static int
++bthidbus_modevent(module_t mod, int type, void *data)
++{
++	int error;
++	error = 0;
++	switch (type) {
++	case MOD_LOAD: {
++		break;
++	}
++	case MOD_UNLOAD: {
++		error = device_delete_child(device_get_parent(bthidbus), bthidbus);
++		if (error == 0)
++			bthidbus = NULL;
++		break;
++	}
++	default: {
++		break;
++	}
++	}
++	return (error);
++}
++
++static driver_t bthidbus_driver = {
++	"bthidbus",
++	bthidbus_methods,
++	sizeof(struct bthidbus_softc)
++};
++
++DRIVER_MODULE(bthidbus, nexus, bthidbus_driver, bthidbus_modevent, NULL);
++MODULE_VERSION(bthidbus, 1);
+diff --git a/sys/dev/hid/bthid/bthidbus.h b/sys/dev/hid/bthid/bthidbus.h
+new file mode 100644
+index 00000000000..64abdbf4f99
+--- /dev/null
++++ b/sys/dev/hid/bthid/bthidbus.h
+@@ -0,0 +1,20 @@
++#ifndef _BTHIDBUS_H_
++#define _BTHIDBUS_H_
++
++#include <sys/ioccom.h>
++#include <sys/types.h>
++
++struct bthidbus_new_connection {
++	int		ctrl_sock;
++	int		intr_sock;
++	uint16_t	vendor_id;
++	uint16_t	product_id;
++	uint16_t	version_id;
++	void		*rdesc;
++	size_t		rdesc_len;
++
++};
++
++#define BTHIDBUS_NEW_CONNECTION _IOW('B', 1, struct bthidbus_new_connection)
++
++#endif /* !_BTHIDBUS_H_ */
+diff --git a/sys/modules/hid/bthid/Makefile b/sys/modules/hid/bthid/Makefile
+new file mode 100644
+index 00000000000..27fe94b1585
+--- /dev/null
++++ b/sys/modules/hid/bthid/Makefile
+@@ -0,0 +1,9 @@
++.PATH: ${SRCTOP}/sys/dev/hid/bthid
++
++KMOD=	bthid
++SRCS=	bthid.c
++SRCS+=	device_if.h bus_if.h hid_if.h
++
++DEBUG_FLAGS=-g
++
++.include <bsd.kmod.mk>
+diff --git a/sys/modules/hid/bthidbus/Makefile b/sys/modules/hid/bthidbus/Makefile
+new file mode 100644
+index 00000000000..3ea0c6b52eb
+--- /dev/null
++++ b/sys/modules/hid/bthidbus/Makefile
+@@ -0,0 +1,9 @@
++.PATH: ${SRCTOP}/sys/dev/hid/bthid
++
++KMOD=	bthidbus
++SRCS=	bthidbus.c
++SRCS+=	device_if.h bus_if.h
++
++DEBUG_FLAGS=-g
++
++.include <bsd.kmod.mk>
+-- 
+2.55.0
+
