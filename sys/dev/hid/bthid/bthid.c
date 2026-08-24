@@ -152,6 +152,7 @@ static int
 bthid_intr_start(device_t dev, device_t child __unused)
 {
 	struct bthid_softc *sc;
+
 	sc = device_get_softc(dev);
 	SOCK_RECVBUF_LOCK(sc->intr);
 	soupcall_set(sc->intr, SO_RCV, intr_upcall, &sc->intr_task);
