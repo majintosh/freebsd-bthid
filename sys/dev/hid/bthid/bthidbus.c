@@ -89,9 +89,9 @@ new_connection(device_t bus, struct bthidbus_new_connection *con, struct socket 
 
 	mtx_lock(&Giant);
 	error = device_probe_and_attach(child);
-	mtx_unlock(&Giant);
 	if (error != 0)
 		device_delete_child(bus, child);
+	mtx_unlock(&Giant);
 
 	return (error);
 }
