@@ -204,7 +204,7 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 	return (ENOTTY);
 }
 
-static void 
+static void
 bthidbus_child_deleted(device_t bus, device_t child)
 {
 	struct bthid_ivars *ivars;
