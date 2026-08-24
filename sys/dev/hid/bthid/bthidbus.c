@@ -165,6 +165,7 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 			return (err);
 		}
 
+		/* Shouldn't overwrite the ioctl struct's rdsec field */
 		con->rdesc = kern_rdesc;
 		cap_rights_init_one(&rights, CAP_SOCK_CLIENT);
 
@@ -202,6 +203,18 @@ bthidbus_ioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flag, struct thre
 	}
 	return (ENOTTY);
 }
+
+static void 
+bthidbus_child_deleted(device_t bus, device_t child)
+{
+	struct bthid_ivars *ivars;
+
+	ivars = device_get_ivars(child);
+	free(ivars->rdesc, M_DEVBUF);
+	free(ivars, M_DEVBUF);
+	device_set_ivars(child, NULL);
+}
+
 static device_method_t bthidbus_methods[] = {
 	DEVMETHOD(device_identify,	bthidbus_identify),
 	DEVMETHOD(device_probe,		bthidbus_probe),
@@ -210,6 +223,7 @@ static device_method_t bthidbus_methods[] = {
 
 	/* BUS METHODS */
 	DEVMETHOD(bus_add_child,	bthidbus_add_child),
+	DEVMETHOD(bus_child_deleted,	bthidbus_child_deleted),
 	DEVMETHOD_END
 };
 

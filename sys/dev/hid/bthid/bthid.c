@@ -60,7 +60,6 @@ bthid_detach(device_t dev)
 	taskqueue_drain(taskqueue_swi, &sc->intr_task);
 	socket_close(sc->ctrl, sc->ctrl_file);
 	socket_close(sc->intr, sc->intr_file);
-	free(sc->rdesc.data, M_DEVBUF);
 	return (0);
 }
 
@@ -75,7 +74,6 @@ bthid_attach(device_t dev)
 	child = device_add_child(dev, "hidbus", DEVICE_UNIT_ANY);
 	if (child == NULL) {
 		device_printf(dev, "Couldn't add hidbus device\n");
-		free(ivar->rdesc, M_DEVBUF);
 		return (ENOMEM);
 	}
 	sc = device_get_softc(dev);
